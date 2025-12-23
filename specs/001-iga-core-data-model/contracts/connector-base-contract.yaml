@@ -1,0 +1,521 @@
+openapi: 3.1.0
+info:
+  title: IGA Connector Base Contract
+  version: 1.0.0
+  description: |
+    Standardized contract for IGA target system connectors.
+
+    All connectors (LDAP, SCIM, K8s, etc.) MUST implement this interface to ensure
+    consistent integration with the IGA core system.
+
+    This contract is derived from `.specify/memory/coverage-matrix.yaml`
+    `connector_contracts` section (lines 182-316).
+
+    **Connector Families**: ldap, scim, idp_admin, k8s_api, sql, iac_opentofu,
+    policy_opa, rebac_fga, secrets_openbao, pki_ca, workload_spire, evidence_only
+
+servers:
+  - url: http://localhost:3000/api/connectors
+    description: Connector framework API (internal)
+
+tags:
+  - name: Discovery
+    description: Account, entitlement, and grant discovery operations
+  - name: Provisioning
+    description: Grant and revoke operations
+  - name: Tasks
+    description: Asynchronous provisioning task status
+
+paths:
+  /discover-accounts:
+    post:
+      summary: Discover accounts in target system
+      tags: [Discovery]
+      description: |
+        Fetch accounts from target system with pagination support.
+        Connector translates target-specific account format to canonical Account schema.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverAccountsRequest'
+      responses:
+        '200':
+          description: Accounts discovered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoverAccountsResponse'
+
+  /discover-entitlements:
+    post:
+      summary: Discover entitlements in target system
+      tags: [Discovery]
+      description: |
+        Fetch entitlements (groups, roles, policies, etc.) from target system.
+        Connector normalizes target-specific entitlement format to canonical Entitlement schema.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverEntitlementsRequest'
+      responses:
+        '200':
+          description: Entitlements discovered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoverEntitlementsResponse'
+
+  /discover-grants:
+    post:
+      summary: Discover grants in target system
+      tags: [Discovery]
+      description: |
+        Fetch account-to-entitlement grants (memberships, assignments, etc.).
+        Connector translates target-specific grant representation to canonical Grant schema.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverGrantsRequest'
+      responses:
+        '200':
+          description: Grants discovered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoverGrantsResponse'
+
+  /grant-entitlement:
+    post:
+      summary: Grant entitlement to account
+      tags: [Provisioning]
+      description: |
+        Provision access by granting entitlement to account in target system.
+        Operation may be synchronous or asynchronous (returns provisioning task ID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantEntitlementRequest'
+      responses:
+        '200':
+          description: Grant provisioning initiated or completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantEntitlementResponse'
+
+  /revoke-entitlement:
+    post:
+      summary: Revoke entitlement from account
+      tags: [Provisioning]
+      description: |
+        Deprovision access by revoking entitlement from account in target system.
+        Operation may be synchronous or asynchronous (returns provisioning task ID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeEntitlementRequest'
+      responses:
+        '200':
+          description: Revoke provisioning initiated or completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeEntitlementResponse'
+
+  /task-status:
+    post:
+      summary: Get provisioning task status
+      tags: [Tasks]
+      description: |
+        Query status of asynchronous provisioning task.
+        Used for long-running grant/revoke operations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetTaskStatusRequest'
+      responses:
+        '200':
+          description: Task status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTaskStatusResponse'
+
+components:
+  schemas:
+    # ==================== COMMON TYPES ====================
+    Account:
+      type: object
+      required: [account_id, system_id, account_type, native_id, status, attributes, last_seen]
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          description: IGA-assigned account ID (nullable for discovery responses)
+          nullable: true
+        system_id:
+          type: string
+          format: uuid
+          description: Target system ID
+        account_type:
+          type: string
+          description: Account type from coverage-matrix.yaml (e.g., ldap_user, idp_user)
+          example: "ldap_user"
+        native_id:
+          type: string
+          description: Immutable account identifier in target system
+          example: "cn=jdoe,ou=users,dc=example,dc=com"
+        status:
+          type: string
+          enum: [CREATED, ACTIVE, DISABLED, DELETED]
+        attributes:
+          type: object
+          additionalProperties: true
+          description: Target system-specific attributes
+        last_seen:
+          type: string
+          format: date-time
+          description: Discovery timestamp
+
+    Entitlement:
+      type: object
+      required: [entitlement_id, system_id, entitlement_type, native_id, display_name, shape, risk]
+      properties:
+        entitlement_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: IGA-assigned entitlement ID (nullable for discovery responses)
+        system_id:
+          type: string
+          format: uuid
+        entitlement_type:
+          type: string
+          description: Entitlement type from coverage-matrix.yaml (e.g., group, role, policy_document)
+          example: "group"
+        native_id:
+          type: string
+          description: Entitlement identifier in target system
+          example: "CN=Admins,OU=Groups,DC=example,DC=com"
+        display_name:
+          type: string
+          example: "Domain Admins"
+        shape:
+          type: object
+          additionalProperties: true
+          description: Entitlement-specific attributes (path, permissions, policy, etc.)
+        risk:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Risk score (0-100), calculated by connector or IGA core
+
+    Grant:
+      type: object
+      required: [grant_id, account_id, entitlement_id, grant_type, start_time, state]
+      properties:
+        grant_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: IGA-assigned grant ID (nullable for discovery responses)
+        account_id:
+          type: string
+          format: uuid
+          description: IGA account ID (or native_id for discovery)
+        entitlement_id:
+          type: string
+          format: uuid
+          description: IGA entitlement ID (or native_id for discovery)
+        grant_type:
+          type: string
+          enum: [DIRECT, GROUP_IN_GROUP, POLICY_DERIVED]
+          description: Grant derivation type
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: Expiry timestamp (null = no expiry)
+        state:
+          type: string
+          enum: [PENDING, ACTIVE, FAILED, EXPIRED, REVOKED]
+
+    Evidence:
+      type: object
+      required: [evidence_id, kind, collected_at]
+      properties:
+        evidence_id:
+          type: string
+          format: uuid
+          description: Evidence record ID
+        kind:
+          type: string
+          description: Evidence type (ldap_modify, http_request_log, manifest_applied, etc.)
+          example: "ldap_modify"
+        ref:
+          type: string
+          description: Reference to evidence artifact (URL, file path, log entry ID)
+        collected_at:
+          type: string
+          format: date-time
+        hash:
+          type: string
+          nullable: true
+          description: Cryptographic hash (SHA-256) of evidence payload
+        notes:
+          type: string
+          nullable: true
+
+    # ==================== DISCOVER ACCOUNTS ====================
+    DiscoverAccountsRequest:
+      type: object
+      required: [system_id, account_type]
+      properties:
+        system_id:
+          type: string
+          format: uuid
+          description: Target system ID
+        account_type:
+          type: string
+          description: Account type to discover (e.g., ldap_user, k8s_service_account)
+        cursor:
+          type: string
+          nullable: true
+          description: Pagination cursor (connector-specific)
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+        filter:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: Connector-specific filter (e.g., ldap_filter, base_dn for LDAP)
+
+    DiscoverAccountsResponse:
+      type: object
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor for next page (null if last page)
+        watermark:
+          type: string
+          nullable: true
+          description: High-water mark for incremental discovery
+
+    # ==================== DISCOVER ENTITLEMENTS ====================
+    DiscoverEntitlementsRequest:
+      type: object
+      required: [system_id, entitlement_type]
+      properties:
+        system_id:
+          type: string
+          format: uuid
+        entitlement_type:
+          type: string
+          description: Entitlement type to discover (e.g., group, role, policy_document)
+        cursor:
+          type: string
+          nullable: true
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+        filter:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    DiscoverEntitlementsResponse:
+      type: object
+      required: [entitlements]
+      properties:
+        entitlements:
+          type: array
+          items:
+            $ref: '#/components/schemas/Entitlement'
+        next_cursor:
+          type: string
+          nullable: true
+        watermark:
+          type: string
+          nullable: true
+
+    # ==================== DISCOVER GRANTS ====================
+    DiscoverGrantsRequest:
+      type: object
+      required: [system_id]
+      properties:
+        system_id:
+          type: string
+          format: uuid
+        account_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          nullable: true
+          description: Filter by specific accounts (optional)
+        entitlement_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          nullable: true
+          description: Filter by specific entitlements (optional)
+        cursor:
+          type: string
+          nullable: true
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+
+    DiscoverGrantsResponse:
+      type: object
+      required: [grants]
+      properties:
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Grant'
+        next_cursor:
+          type: string
+          nullable: true
+        watermark:
+          type: string
+          nullable: true
+
+    # ==================== GRANT ENTITLEMENT ====================
+    GrantEntitlementRequest:
+      type: object
+      required: [system_id, account_native_id, entitlement_native_id, assignment_id]
+      properties:
+        system_id:
+          type: string
+          format: uuid
+        account_native_id:
+          type: string
+          description: Account native ID in target system
+        entitlement_native_id:
+          type: string
+          description: Entitlement native ID in target system
+        assignment_id:
+          type: string
+          format: uuid
+          description: IGA AccessAssignment ID (for evidence linking)
+        time_bound:
+          type: object
+          nullable: true
+          properties:
+            end_time:
+              type: string
+              format: date-time
+            notes:
+              type: string
+          description: Time-bound access constraints (if target supports native expiry)
+
+    GrantEntitlementResponse:
+      type: object
+      required: [provisioning_task_id, state]
+      properties:
+        provisioning_task_id:
+          type: string
+          description: Async task ID (if async) or success confirmation (if sync)
+        state:
+          type: string
+          enum: [SUCCESS, PENDING, FAILED]
+          description: Immediate state (SUCCESS for sync, PENDING for async)
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/Evidence'
+          nullable: true
+          description: Provisioning evidence (API logs, state snapshots)
+
+    # ==================== REVOKE ENTITLEMENT ====================
+    RevokeEntitlementRequest:
+      type: object
+      required: [system_id, account_native_id, entitlement_native_id, assignment_id]
+      properties:
+        system_id:
+          type: string
+          format: uuid
+        account_native_id:
+          type: string
+        entitlement_native_id:
+          type: string
+        assignment_id:
+          type: string
+          format: uuid
+
+    RevokeEntitlementResponse:
+      type: object
+      required: [provisioning_task_id, state]
+      properties:
+        provisioning_task_id:
+          type: string
+        state:
+          type: string
+          enum: [SUCCESS, PENDING, FAILED]
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/Evidence'
+          nullable: true
+
+    # ==================== TASK STATUS ====================
+    GetTaskStatusRequest:
+      type: object
+      required: [system_id, provisioning_task_id]
+      properties:
+        system_id:
+          type: string
+          format: uuid
+        provisioning_task_id:
+          type: string
+          description: Task ID returned from grant/revoke operation
+
+    GetTaskStatusResponse:
+      type: object
+      required: [state, updated_at]
+      properties:
+        state:
+          type: string
+          enum: [PENDING, SUCCESS, FAILED]
+        updated_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+          nullable: true
+          description: Error message (if state = FAILED)
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/Evidence'
+          nullable: true

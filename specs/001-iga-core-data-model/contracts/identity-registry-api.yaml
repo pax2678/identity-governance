@@ -1,0 +1,1061 @@
+openapi: 3.1.0
+info:
+  title: IGA Identity Registry API
+  version: 1.0.0
+  description: |
+    REST API for IGA (Identity Governance and Administration) Identity Registry.
+
+    Provides CRUD operations for core entities (Identity, Account, Entitlement, Grant)
+    and graph queries for effective access and correlation.
+
+    **Authentication**: All endpoints require Bearer token (NextAuth.js session)
+    **Authorization**: Role-based access control via middleware
+  contact:
+    name: IGA Core Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local development
+  - url: https://iga-prototype.vercel.app/api
+    description: Production (Vercel)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Identities
+    description: Identity management endpoints
+  - name: Accounts
+    description: Account management and correlation
+  - name: Entitlements
+    description: Entitlement catalog operations
+  - name: Grants
+    description: Access grant tracking and queries
+  - name: Systems
+    description: Target system configuration
+
+paths:
+  # ==================== IDENTITIES ====================
+  /identities:
+    get:
+      summary: List identities
+      tags: [Identities]
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/IdentityStatus'
+          description: Filter by identity status
+        - name: identityType
+          in: query
+          schema:
+            $ref: '#/components/schemas/IdentityType'
+          description: Filter by identity type
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search by displayName or email (fuzzy match)
+      responses:
+        '200':
+          description: List of identities
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  identities:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Identity'
+                  nextCursor:
+                    type: string
+                    nullable: true
+                  total:
+                    type: integer
+
+    post:
+      summary: Create identity
+      tags: [Identities]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIdentityRequest'
+      responses:
+        '201':
+          description: Identity created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /identities/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdentityId'
+
+    get:
+      summary: Get identity by ID
+      tags: [Identities]
+      responses:
+        '200':
+          description: Identity details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityWithRelations'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update identity
+      tags: [Identities]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIdentityRequest'
+      responses:
+        '200':
+          description: Identity updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Delete identity (soft delete)
+      tags: [Identities]
+      responses:
+        '204':
+          description: Identity deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /identities/{id}/accounts:
+    parameters:
+      - $ref: '#/components/parameters/IdentityId'
+
+    get:
+      summary: Get accounts linked to identity
+      tags: [Identities]
+      responses:
+        '200':
+          description: List of linked accounts with correlation details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AccountWithLink'
+
+  /identities/{id}/effective-access:
+    parameters:
+      - $ref: '#/components/parameters/IdentityId'
+
+    get:
+      summary: Get effective access for identity
+      tags: [Identities]
+      description: |
+        Returns all entitlements the identity has access to (directly or via nested groups).
+        Uses graph query for transitive grant calculation.
+      responses:
+        '200':
+          description: Effective access graph
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  identity:
+                    $ref: '#/components/schemas/Identity'
+                  effectiveGrants:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EffectiveGrant'
+
+  # ==================== ACCOUNTS ====================
+  /accounts:
+    get:
+      summary: List accounts
+      tags: [Accounts]
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Cursor'
+        - name: systemId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by target system
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AccountStatus'
+          description: Filter by account status
+      responses:
+        '200':
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Account'
+                  nextCursor:
+                    type: string
+                    nullable: true
+
+    post:
+      summary: Create account
+      tags: [Accounts]
+      description: Manually create account record (typically populated via connector discovery)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+
+  /accounts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+
+    get:
+      summary: Get account by ID
+      tags: [Accounts]
+      responses:
+        '200':
+          description: Account details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountWithRelations'
+
+    patch:
+      summary: Update account
+      tags: [Accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAccountRequest'
+      responses:
+        '200':
+          description: Account updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+
+  /accounts/{id}/grants:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+
+    get:
+      summary: Get grants for account
+      tags: [Accounts]
+      responses:
+        '200':
+          description: List of grants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  grants:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GrantWithEntitlement'
+
+  # ==================== ENTITLEMENTS ====================
+  /entitlements:
+    get:
+      summary: List entitlements
+      tags: [Entitlements]
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Cursor'
+        - name: systemId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by target system
+        - name: entitlementType
+          in: query
+          schema:
+            type: string
+          description: Filter by entitlement type (group, role, policy_document, etc.)
+        - name: isPrivileged
+          in: query
+          schema:
+            type: boolean
+          description: Filter by privileged flag
+        - name: minRiskScore
+          in: query
+          schema:
+            type: integer
+          description: Minimum risk score (0-100)
+      responses:
+        '200':
+          description: List of entitlements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entitlements:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Entitlement'
+                  nextCursor:
+                    type: string
+                    nullable: true
+
+    post:
+      summary: Create entitlement
+      tags: [Entitlements]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEntitlementRequest'
+      responses:
+        '201':
+          description: Entitlement created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entitlement'
+
+  /entitlements/{id}:
+    parameters:
+      - $ref: '#/components/parameters/EntitlementId'
+
+    get:
+      summary: Get entitlement by ID
+      tags: [Entitlements]
+      responses:
+        '200':
+          description: Entitlement details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementWithRelations'
+
+    patch:
+      summary: Update entitlement
+      tags: [Entitlements]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEntitlementRequest'
+      responses:
+        '200':
+          description: Entitlement updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entitlement'
+
+  # ==================== GRANTS ====================
+  /grants:
+    get:
+      summary: Query grants (access graph)
+      tags: [Grants]
+      description: |
+        Flexible grant query endpoint supporting multiple filters.
+        Primary use case: "who has access to what" queries.
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Cursor'
+        - name: accountId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by account
+        - name: entitlementId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by entitlement
+        - name: state
+          in: query
+          schema:
+            $ref: '#/components/schemas/GrantState'
+          description: Filter by grant state
+      responses:
+        '200':
+          description: List of grants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  grants:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GrantWithDetails'
+                  nextCursor:
+                    type: string
+                    nullable: true
+
+  /grants/{id}:
+    parameters:
+      - $ref: '#/components/parameters/GrantId'
+
+    get:
+      summary: Get grant by ID
+      tags: [Grants]
+      responses:
+        '200':
+          description: Grant details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantWithDetails'
+
+  # ==================== SYSTEMS ====================
+  /systems:
+    get:
+      summary: List target systems
+      tags: [Systems]
+      responses:
+        '200':
+          description: List of systems
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  systems:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/System'
+
+    post:
+      summary: Register target system
+      tags: [Systems]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSystemRequest'
+      responses:
+        '201':
+          description: System registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/System'
+
+  /systems/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SystemId'
+
+    get:
+      summary: Get system by ID
+      tags: [Systems]
+      responses:
+        '200':
+          description: System details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/System'
+
+    patch:
+      summary: Update system configuration
+      tags: [Systems]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSystemRequest'
+      responses:
+        '200':
+          description: System updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/System'
+
+# ==================== COMPONENTS ====================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    IdentityId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Identity UUID
+
+    AccountId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Account UUID
+
+    EntitlementId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Entitlement UUID
+
+    GrantId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Grant UUID
+
+    SystemId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: System UUID
+
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+      description: Number of items per page
+
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+      description: Pagination cursor from previous response
+
+  schemas:
+    # ==================== IDENTITY SCHEMAS ====================
+    IdentityType:
+      type: string
+      enum: [HUMAN, SERVICE, AGENT, DEVICE, EXTERNAL]
+
+    IdentityStatus:
+      type: string
+      enum: [ACTIVE, STAGED, DISABLED, DELETED]
+
+    Identity:
+      type: object
+      required: [id, identityType, displayName, status, identitySource]
+      properties:
+        id:
+          type: string
+          format: uuid
+        identityType:
+          $ref: '#/components/schemas/IdentityType'
+        displayName:
+          type: string
+        status:
+          $ref: '#/components/schemas/IdentityStatus'
+        identitySource:
+          type: string
+          example: "HRIS"
+        attributes:
+          type: object
+          additionalProperties: true
+          example:
+            email: "john.doe@example.com"
+            employeeId: "E12345"
+            department: "Engineering"
+        ownerIdentityId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    IdentityWithRelations:
+      allOf:
+        - $ref: '#/components/schemas/Identity'
+        - type: object
+          properties:
+            accountLinks:
+              type: array
+              items:
+                $ref: '#/components/schemas/IdentityAccountLink'
+
+    CreateIdentityRequest:
+      type: object
+      required: [identityType, displayName, identitySource]
+      properties:
+        identityType:
+          $ref: '#/components/schemas/IdentityType'
+        displayName:
+          type: string
+        identitySource:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+        ownerIdentityId:
+          type: string
+          format: uuid
+          nullable: true
+
+    UpdateIdentityRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        status:
+          $ref: '#/components/schemas/IdentityStatus'
+        attributes:
+          type: object
+          additionalProperties: true
+
+    # ==================== ACCOUNT SCHEMAS ====================
+    AccountStatus:
+      type: string
+      enum: [CREATED, ACTIVE, DISABLED, DELETED]
+
+    Account:
+      type: object
+      required: [id, systemId, accountType, nativeId, status, lastSeenAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        systemId:
+          type: string
+          format: uuid
+        accountType:
+          type: string
+          example: "ldap_user"
+        nativeId:
+          type: string
+          example: "cn=jdoe,ou=users,dc=example,dc=com"
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+        lastSeenAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AccountWithRelations:
+      allOf:
+        - $ref: '#/components/schemas/Account'
+        - type: object
+          properties:
+            system:
+              $ref: '#/components/schemas/System'
+            identityLinks:
+              type: array
+              items:
+                $ref: '#/components/schemas/IdentityAccountLink'
+            grants:
+              type: array
+              items:
+                $ref: '#/components/schemas/Grant'
+
+    AccountWithLink:
+      allOf:
+        - $ref: '#/components/schemas/Account'
+        - type: object
+          properties:
+            link:
+              $ref: '#/components/schemas/IdentityAccountLink'
+
+    CreateAccountRequest:
+      type: object
+      required: [systemId, accountType, nativeId, status]
+      properties:
+        systemId:
+          type: string
+          format: uuid
+        accountType:
+          type: string
+        nativeId:
+          type: string
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+        metadata:
+          type: object
+          additionalProperties: true
+
+    UpdateAccountRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+        lastSeenAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+
+    # ==================== ENTITLEMENT SCHEMAS ====================
+    Entitlement:
+      type: object
+      required: [id, systemId, entitlementType, nativeId, displayName, riskScore, isPrivileged]
+      properties:
+        id:
+          type: string
+          format: uuid
+        systemId:
+          type: string
+          format: uuid
+        entitlementType:
+          type: string
+          example: "group"
+        nativeId:
+          type: string
+          example: "CN=Admins,OU=Groups,DC=example,DC=com"
+        displayName:
+          type: string
+          example: "Domain Admins"
+        riskScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        isPrivileged:
+          type: boolean
+        ownerIdentityId:
+          type: string
+          format: uuid
+          nullable: true
+        shape:
+          type: object
+          additionalProperties: true
+          example:
+            path: "/admins"
+            isNested: false
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    EntitlementWithRelations:
+      allOf:
+        - $ref: '#/components/schemas/Entitlement'
+        - type: object
+          properties:
+            system:
+              $ref: '#/components/schemas/System'
+            owner:
+              $ref: '#/components/schemas/Identity'
+            grants:
+              type: array
+              items:
+                $ref: '#/components/schemas/Grant'
+
+    CreateEntitlementRequest:
+      type: object
+      required: [systemId, entitlementType, nativeId, displayName]
+      properties:
+        systemId:
+          type: string
+          format: uuid
+        entitlementType:
+          type: string
+        nativeId:
+          type: string
+        displayName:
+          type: string
+        riskScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          default: 0
+        ownerIdentityId:
+          type: string
+          format: uuid
+          nullable: true
+        shape:
+          type: object
+          additionalProperties: true
+
+    UpdateEntitlementRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        riskScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        isPrivileged:
+          type: boolean
+        ownerIdentityId:
+          type: string
+          format: uuid
+          nullable: true
+
+    # ==================== GRANT SCHEMAS ====================
+    GrantType:
+      type: string
+      enum: [DIRECT, GROUP_IN_GROUP, POLICY_DERIVED]
+
+    GrantState:
+      type: string
+      enum: [PENDING, ACTIVE, FAILED, EXPIRED, REVOKED]
+
+    Grant:
+      type: object
+      required: [id, accountId, entitlementId, grantType, startTime, state]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        entitlementId:
+          type: string
+          format: uuid
+        grantType:
+          $ref: '#/components/schemas/GrantType'
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+          nullable: true
+        state:
+          $ref: '#/components/schemas/GrantState'
+        provisioningTaskId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    GrantWithEntitlement:
+      allOf:
+        - $ref: '#/components/schemas/Grant'
+        - type: object
+          properties:
+            entitlement:
+              $ref: '#/components/schemas/Entitlement'
+
+    GrantWithDetails:
+      allOf:
+        - $ref: '#/components/schemas/Grant'
+        - type: object
+          properties:
+            account:
+              $ref: '#/components/schemas/Account'
+            entitlement:
+              $ref: '#/components/schemas/Entitlement'
+
+    EffectiveGrant:
+      type: object
+      required: [account, entitlement, grantPath]
+      properties:
+        account:
+          $ref: '#/components/schemas/Account'
+        entitlement:
+          $ref: '#/components/schemas/Entitlement'
+        grantPath:
+          type: array
+          items:
+            type: object
+            properties:
+              grant:
+                $ref: '#/components/schemas/Grant'
+              entitlement:
+                $ref: '#/components/schemas/Entitlement'
+          description: Graph path from account to entitlement (including nested groups)
+
+    # ==================== SYSTEM SCHEMAS ====================
+    System:
+      type: object
+      required: [id, name, systemType, connectorFamily]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Production LDAP"
+        systemType:
+          type: string
+          example: "LDAP"
+        connectorFamily:
+          type: string
+          example: "ldap"
+        connectionConfig:
+          type: object
+          additionalProperties: true
+          example:
+            host: "ldap.example.com"
+            port: 636
+            baseDN: "dc=example,dc=com"
+        isAuthoritative:
+          type: boolean
+          default: false
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateSystemRequest:
+      type: object
+      required: [name, systemType, connectorFamily, connectionConfig]
+      properties:
+        name:
+          type: string
+        systemType:
+          type: string
+        connectorFamily:
+          type: string
+        connectionConfig:
+          type: object
+          additionalProperties: true
+        isAuthoritative:
+          type: boolean
+          default: false
+
+    UpdateSystemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        connectionConfig:
+          type: object
+          additionalProperties: true
+
+    # ==================== LINK SCHEMAS ====================
+    IdentityAccountLink:
+      type: object
+      required: [id, identityId, accountId, relationType, startTime, source]
+      properties:
+        id:
+          type: string
+          format: uuid
+        identityId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        relationType:
+          type: string
+          enum: [PRIMARY, ADMIN, SHARED, DELEGATED, BREAKGLASS]
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+          nullable: true
+        source:
+          type: string
+          enum: [BIRTHRIGHT, REQUEST, IMPORTED, EXCEPTION]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "Resource not found"
+
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "Validation failed"
+              details:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    field:
+                      type: string
+                    message:
+                      type: string

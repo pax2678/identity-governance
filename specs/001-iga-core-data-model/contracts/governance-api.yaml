@@ -1,0 +1,959 @@
+openapi: 3.1.0
+info:
+  title: IGA Governance API
+  version: 1.0.0
+  description: |
+    REST API for IGA governance workflows:
+    - Access requests and approvals (P4 user story)
+    - Access certification campaigns (P6 user story)
+    - SoD (Segregation of Duties) policy enforcement
+    - Provisioning task management
+
+    **Authentication**: Bearer token (NextAuth.js session)
+    **Authorization**: Role-based (requestor, approver, admin)
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local development
+  - url: https://iga-prototype.vercel.app/api
+    description: Production
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Access Requests
+    description: Access request creation and approval workflow
+  - name: Certifications
+    description: Access certification campaigns
+  - name: Provisioning
+    description: Provisioning task management
+  - name: Policies
+    description: SoD and birthright policy management
+
+paths:
+  # ==================== ACCESS REQUESTS ====================
+  /access-requests:
+    post:
+      summary: Create access request
+      tags: [Access Requests]
+      description: |
+        User or admin requests access to entitlement for identity/account.
+        Triggers approval workflow routing per entitlement owner and risk score.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccessRequestRequest'
+      responses:
+        '201':
+          description: Access request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessAssignment'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: SoD violation detected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "SoD violation: Conflicting entitlement pair"
+                  violatedPolicy:
+                    type: object
+                    properties:
+                      policyId:
+                        type: string
+                        format: uuid
+                      conflictingEntitlements:
+                        type: array
+                        items:
+                          type: string
+                          format: uuid
+
+    get:
+      summary: List access requests
+      tags: [Access Requests]
+      parameters:
+        - name: approvalState
+          in: query
+          schema:
+            $ref: '#/components/schemas/ApprovalState'
+          description: Filter by approval state
+        - name: requestorId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by requestor identity
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of access requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessRequests:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AccessAssignment'
+                  nextCursor:
+                    type: string
+                    nullable: true
+
+  /access-requests/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      summary: Get access request by ID
+      tags: [Access Requests]
+      responses:
+        '200':
+          description: Access request details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessAssignmentWithDetails'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /access-requests/{id}/approve:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      summary: Approve or reject access request
+      tags: [Access Requests]
+      description: |
+        Approver makes decision on pending access request.
+        Approval triggers provisioning workflow (if approved).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveAccessRequestRequest'
+      responses:
+        '200':
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessAssignment'
+        '403':
+          description: User not authorized to approve this request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Not authorized to approve this request"
+
+  /access-requests/my-approvals:
+    get:
+      summary: Get pending approvals for current user
+      tags: [Access Requests]
+      description: |
+        Returns access requests awaiting approval by current user.
+        Filters by approvers array containing current user's identity ID.
+      responses:
+        '200':
+          description: Pending approvals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pendingApprovals:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AccessAssignmentWithDetails'
+
+  # ==================== CERTIFICATIONS ====================
+  /certifications/campaigns:
+    post:
+      summary: Create certification campaign
+      tags: [Certifications]
+      description: |
+        Admin creates access certification campaign scoped by entitlements/systems.
+        System generates review tasks for all in-scope grants.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCertificationCampaignRequest'
+      responses:
+        '201':
+          description: Campaign created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificationCampaign'
+
+    get:
+      summary: List certification campaigns
+      tags: [Certifications]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/CampaignStatus'
+      responses:
+        '200':
+          description: List of campaigns
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  campaigns:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CertificationCampaign'
+
+  /certifications/campaigns/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      summary: Get campaign by ID
+      tags: [Certifications]
+      responses:
+        '200':
+          description: Campaign details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificationCampaignWithDetails'
+
+    patch:
+      summary: Update campaign status
+      tags: [Certifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  $ref: '#/components/schemas/CampaignStatus'
+      responses:
+        '200':
+          description: Campaign updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificationCampaign'
+
+  /certifications/campaigns/{id}/reviews:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      summary: Get certification reviews for campaign
+      tags: [Certifications]
+      parameters:
+        - name: reviewerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by reviewer
+        - name: decision
+          in: query
+          schema:
+            $ref: '#/components/schemas/ReviewDecision'
+          description: Filter by decision (CERTIFY/REVOKE)
+      responses:
+        '200':
+          description: List of reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reviews:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CertificationReview'
+
+    post:
+      summary: Submit certification review decision
+      tags: [Certifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitCertificationReviewRequest'
+      responses:
+        '200':
+          description: Review decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificationReview'
+
+  /certifications/my-reviews:
+    get:
+      summary: Get pending reviews for current user
+      tags: [Certifications]
+      description: |
+        Returns certification reviews awaiting decision by current user.
+      responses:
+        '200':
+          description: Pending reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pendingReviews:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CertificationReviewWithGrant'
+
+  # ==================== PROVISIONING ====================
+  /provisioning/tasks:
+    get:
+      summary: List provisioning tasks
+      tags: [Provisioning]
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, SUCCESS, FAILED]
+        - name: assignmentId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by access assignment
+      responses:
+        '200':
+          description: List of provisioning tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProvisioningTask'
+
+  /provisioning/tasks/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      summary: Get provisioning task status
+      tags: [Provisioning]
+      responses:
+        '200':
+          description: Task status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvisioningTask'
+
+    post:
+      summary: Retry failed provisioning task
+      tags: [Provisioning]
+      description: |
+        Retry provisioning for task in FAILED state.
+        Admin-only operation.
+      responses:
+        '200':
+          description: Task retry initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvisioningTask'
+
+  # ==================== POLICIES ====================
+  /policies:
+    post:
+      summary: Create policy (SoD or birthright)
+      tags: [Policies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePolicyRequest'
+      responses:
+        '201':
+          description: Policy created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+
+    get:
+      summary: List policies
+      tags: [Policies]
+      parameters:
+        - name: policyType
+          in: query
+          schema:
+            $ref: '#/components/schemas/PolicyType'
+      responses:
+        '200':
+          description: List of policies
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Policy'
+
+  /policies/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      summary: Get policy by ID
+      tags: [Policies]
+      responses:
+        '200':
+          description: Policy details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+
+    patch:
+      summary: Update policy
+      tags: [Policies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isEnabled:
+                  type: boolean
+                policyDefinition:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Policy updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+
+    delete:
+      summary: Delete policy
+      tags: [Policies]
+      responses:
+        '204':
+          description: Policy deleted
+
+  /policies/sod/check:
+    post:
+      summary: Check SoD violations for identity
+      tags: [Policies]
+      description: |
+        Check if adding grant would violate SoD policies.
+        Used pre-provisioning during access request evaluation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId, proposedEntitlementId]
+              properties:
+                identityId:
+                  type: string
+                  format: uuid
+                proposedEntitlementId:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: SoD check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hasViolation:
+                    type: boolean
+                  violatedPolicies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SoDViolation'
+
+# ==================== COMPONENTS ====================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # ==================== ACCESS ASSIGNMENT SCHEMAS ====================
+    ApprovalState:
+      type: string
+      enum: [PENDING_APPROVAL, APPROVED, REJECTED, PROVISIONED, FAILED]
+
+    SubjectType:
+      type: string
+      enum: [IDENTITY, ACCOUNT]
+
+    TargetType:
+      type: string
+      enum: [ENTITLEMENT, ACCOUNT]
+
+    AssignmentAction:
+      type: string
+      enum: [BIND, GRANT, REVOKE]
+
+    AccessAssignment:
+      type: object
+      required: [id, subjectId, subjectType, targetId, targetType, action, requestorId, approvalState, justification]
+      properties:
+        id:
+          type: string
+          format: uuid
+        subjectId:
+          type: string
+          format: uuid
+        subjectType:
+          $ref: '#/components/schemas/SubjectType'
+        targetId:
+          type: string
+          format: uuid
+        targetType:
+          $ref: '#/components/schemas/TargetType'
+        action:
+          $ref: '#/components/schemas/AssignmentAction'
+        requestorId:
+          type: string
+          format: uuid
+        approvalState:
+          $ref: '#/components/schemas/ApprovalState'
+        approvers:
+          type: array
+          items:
+            type: object
+            properties:
+              identityId:
+                type: string
+                format: uuid
+              decision:
+                type: string
+                enum: [APPROVED, REJECTED]
+                nullable: true
+              timestamp:
+                type: string
+                format: date-time
+                nullable: true
+        justification:
+          type: string
+        ticketRef:
+          type: string
+          nullable: true
+        slaDeadline:
+          type: string
+          format: date-time
+          nullable: true
+        isTimeBound:
+          type: boolean
+        endTime:
+          type: string
+          format: date-time
+          nullable: true
+        evidence:
+          type: array
+          items:
+            type: object
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AccessAssignmentWithDetails:
+      allOf:
+        - $ref: '#/components/schemas/AccessAssignment'
+        - type: object
+          properties:
+            requestor:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                displayName:
+                  type: string
+            targetEntitlement:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                displayName:
+                  type: string
+                riskScore:
+                  type: integer
+                isPrivileged:
+                  type: boolean
+
+    CreateAccessRequestRequest:
+      type: object
+      required: [subjectId, subjectType, targetId, targetType, action, justification]
+      properties:
+        subjectId:
+          type: string
+          format: uuid
+          description: Identity or Account ID
+        subjectType:
+          $ref: '#/components/schemas/SubjectType'
+        targetId:
+          type: string
+          format: uuid
+          description: Entitlement or Account ID
+        targetType:
+          $ref: '#/components/schemas/TargetType'
+        action:
+          $ref: '#/components/schemas/AssignmentAction'
+        justification:
+          type: string
+          minLength: 10
+          description: Business justification (minimum 10 characters)
+        ticketRef:
+          type: string
+          nullable: true
+          description: Optional ITSM ticket reference
+        isTimeBound:
+          type: boolean
+          default: false
+        endTime:
+          type: string
+          format: date-time
+          nullable: true
+          description: Required if isTimeBound = true
+
+    ApproveAccessRequestRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [APPROVED, REJECTED]
+        comments:
+          type: string
+          nullable: true
+
+    # ==================== CERTIFICATION SCHEMAS ====================
+    CampaignStatus:
+      type: string
+      enum: [DRAFT, ACTIVE, COMPLETED, CANCELLED]
+
+    ReviewDecision:
+      type: string
+      enum: [CERTIFY, REVOKE]
+
+    CertificationCampaign:
+      type: object
+      required: [id, campaignName, scope, reviewers, dueDate, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaignName:
+          type: string
+        scope:
+          type: object
+          properties:
+            entitlementIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+            systemIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+        reviewers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Identity IDs of reviewers
+        dueDate:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/CampaignStatus'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CertificationCampaignWithDetails:
+      allOf:
+        - $ref: '#/components/schemas/CertificationCampaign'
+        - type: object
+          properties:
+            totalReviews:
+              type: integer
+            completedReviews:
+              type: integer
+            revokedGrants:
+              type: integer
+            completionRate:
+              type: number
+              format: float
+              description: Percentage (0-100)
+
+    CertificationReview:
+      type: object
+      required: [id, campaignId, grantId, reviewerId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaignId:
+          type: string
+          format: uuid
+        grantId:
+          type: string
+          format: uuid
+        reviewerId:
+          type: string
+          format: uuid
+        decision:
+          $ref: '#/components/schemas/ReviewDecision'
+          nullable: true
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CertificationReviewWithGrant:
+      allOf:
+        - $ref: '#/components/schemas/CertificationReview'
+        - type: object
+          properties:
+            grant:
+              type: object
+              properties:
+                accountDisplayName:
+                  type: string
+                entitlementDisplayName:
+                  type: string
+                systemName:
+                  type: string
+
+    CreateCertificationCampaignRequest:
+      type: object
+      required: [campaignName, scope, reviewers, dueDate]
+      properties:
+        campaignName:
+          type: string
+        scope:
+          type: object
+          required: [entitlementIds, systemIds]
+          properties:
+            entitlementIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+            systemIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+        reviewers:
+          type: array
+          items:
+            type: string
+            format: uuid
+        dueDate:
+          type: string
+          format: date-time
+
+    SubmitCertificationReviewRequest:
+      type: object
+      required: [reviewId, decision]
+      properties:
+        reviewId:
+          type: string
+          format: uuid
+        decision:
+          $ref: '#/components/schemas/ReviewDecision'
+
+    # ==================== PROVISIONING SCHEMAS ====================
+    ProvisioningTask:
+      type: object
+      required: [taskId, assignmentId, grantId, state, updatedAt]
+      properties:
+        taskId:
+          type: string
+        assignmentId:
+          type: string
+          format: uuid
+        grantId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [PENDING, SUCCESS, FAILED]
+        updatedAt:
+          type: string
+          format: date-time
+        error:
+          type: string
+          nullable: true
+        evidence:
+          type: array
+          items:
+            type: object
+
+    # ==================== POLICY SCHEMAS ====================
+    PolicyType:
+      type: string
+      enum: [BIRTHRIGHT, SOD, ABAC]
+
+    Policy:
+      type: object
+      required: [id, policyType, policyDefinition, isEnabled]
+      properties:
+        id:
+          type: string
+          format: uuid
+        policyType:
+          $ref: '#/components/schemas/PolicyType'
+        policyDefinition:
+          type: object
+          additionalProperties: true
+          description: Type-specific policy definition (JSON)
+        isEnabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreatePolicyRequest:
+      type: object
+      required: [policyType, policyDefinition]
+      properties:
+        policyType:
+          $ref: '#/components/schemas/PolicyType'
+        policyDefinition:
+          type: object
+          additionalProperties: true
+        isEnabled:
+          type: boolean
+          default: true
+
+    SoDViolation:
+      type: object
+      required: [policyId, conflictingEntitlements, severity]
+      properties:
+        policyId:
+          type: string
+          format: uuid
+        conflictingEntitlements:
+          type: array
+          items:
+            type: string
+            format: uuid
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              details:
+                type: array
+                items:
+                  type: object

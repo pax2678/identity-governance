@@ -1,0 +1,299 @@
+# Technical Research: IGA Core Data Model
+
+**Feature**: IGA Core Data Model
+**Branch**: `001-iga-core-data-model`
+**Date**: 2025-12-23
+**Phase**: Phase 0 (Research & Technology Selection)
+
+## Purpose
+
+This document resolves all "NEEDS CLARIFICATION" items identified in [plan.md](plan.md) Technical Context section. Each decision includes rationale, alternatives considered, and final selection.
+
+---
+
+## Research Items
+
+### 1. ORM Selection: Prisma vs Drizzle
+
+**Decision**: **Prisma**
+
+**Rationale**:
+- **Type Safety**: Both provide excellent TypeScript support, but Prisma's generated client offers better autocomplete and compile-time validation
+- **Schema Definition**: Prisma Schema Language (PSL) is more declarative and easier to read than Drizzle's TypeScript-based schema
+- **Migrations**: Prisma Migrate has robust migration tooling with automatic migration generation and migration history tracking
+- **Graph Relationships**: Prisma supports relation queries with excellent ergonomics (`include`, `select`) which is critical for IGA's identity-account-entitlement graph
+- **Ecosystem**: Larger community, better documentation, more Next.js integration examples
+- **Admin Tools**: Prisma Studio provides built-in database GUI for development
+
+**Alternatives Considered**:
+- **Drizzle**: Lighter weight, SQL-like syntax, potentially better performance. Rejected because Prisma's DX (developer experience) advantages outweigh marginal performance differences for prototype phase. Graph relationship queries are more verbose in Drizzle.
+- **TypeORM**: Mature but decorator-based approach is less idiomatic for modern TypeScript. Migration story is weaker than Prisma.
+
+**Trade-offs Accepted**:
+- Slightly larger bundle size (not an issue for Next.js API Routes)
+- Schema defined in separate PSL file rather than TypeScript (acceptable for clearer schema visualization)
+
+---
+
+### 2. Database Selection: Neo4j vs PostgreSQL with Graph Extensions
+
+**Decision**: **PostgreSQL 16+ with Apache AGE extension**
+
+**Rationale**:
+- **Unified Storage**: Single database handles both relational entities (Identity, Account, Entitlement) and graph queries (who-has-what traversals), reducing operational complexity
+- **SQL Familiarity**: Team familiarity with PostgreSQL reduces learning curve vs Neo4j's Cypher query language
+- **Prisma Compatibility**: Prisma has first-class PostgreSQL support; Neo4j support is limited to Prisma OGM (Object-Graph Mapper) which is less mature
+- **Graph Queries**: Apache AGE (A Graph Extension) provides Cypher-compatible graph queries within PostgreSQL via foreign data wrapper
+- **Cost**: PostgreSQL is OSS with no licensing concerns; Neo4j Community Edition has limitations (no clustering, limited scale)
+- **Scalability**: PostgreSQL with proper indexing and partitioning meets prototype scale targets (10K identities, 50K accounts, 100K grants per SC-014)
+- **Deployment**: PostgreSQL is widely supported (Vercel Postgres, Neon, Supabase, self-hosted); Neo4j requires specialized hosting
+
+**Alternatives Considered**:
+- **Neo4j**: Native graph database with superior graph query performance and built-in graph algorithms. Rejected due to operational complexity, Prisma integration limitations, and prototype deployment constraints. Consider for production if graph query performance becomes bottleneck.
+- **PostgreSQL with pg_graphql**: GraphQL-focused extension; less mature than AGE for graph traversal queries.
+- **PostgreSQL with recursive CTEs only**: Pure SQL approach without extensions. Rejected because complex graph queries (transitive grants, nested groups) become unwieldy without Cypher-like syntax.
+
+**Implementation Notes**:
+- Use Prisma for CRUD operations and simple relation queries
+- Use Apache AGE (via raw SQL or pg-age Node.js client) for complex graph traversals:
+  - Effective access calculation (transitive grants through nested groups)
+  - SoD violation detection (find identities with conflicting entitlement pairs)
+  - Access path queries ("why does identity X have entitlement Y?")
+- Create PostgreSQL views or materialized views for frequently-accessed graph queries to optimize performance
+
+**Trade-offs Accepted**:
+- Dual-mode database access (Prisma for entities, AGE for graphs) adds complexity
+- Graph query performance may not match native graph DB; mitigate with indexing and materialized views
+- Apache AGE extension requires PostgreSQL 11+ and additional installation step
+
+---
+
+### 3. Policy Engine Integration: OPA vs Embedded Evaluator
+
+**Decision**: **Hybrid Approach: Embedded evaluator for birthright rules, OPA HTTP integration for advanced policies**
+
+**Rationale**:
+- **Prototype Simplicity**: Embedded TypeScript evaluator for birthright rules ("dept=Finance → FinanceBaseRole") avoids external service dependency during MVP
+- **Flexibility**: Simple rules (attribute-based birthright grants) can be implemented as TypeScript functions with Zod validation
+- **Scalability Path**: OPA integration via HTTP API for complex policies (SoD rules, ABAC conditions, multi-step approval routing) provides production-ready policy management
+- **Audit Trail**: All policy evaluations (embedded or OPA) emit audit events via FR-029 requirement
+- **Developer Experience**: TypeScript-based rules are easier to debug and test during prototype phase
+
+**Implementation Plan**:
+1. **Phase 1 (P1-P3)**: Embedded evaluator only
+   - Birthright rules: `lib/policy/birthright-rules.ts` exports rule functions
+   - Simple SoD checks: hardcoded conflicting entitlement pairs in `lib/policy/sod-rules.ts`
+2. **Phase 2 (P4-P6)**: Add OPA integration
+   - OPA HTTP client in `lib/policy/opa-client.ts`
+   - Policy bundles stored in `policies/` directory (Rego files)
+   - OPA server deployment via Docker Compose for local dev, containerized for production
+
+**Alternatives Considered**:
+- **OPA only (HTTP-based)**: Rejected for prototype due to operational overhead (running OPA server, managing policy bundles). Suitable for production.
+- **OPA WASM (embedded)**: Compile Rego policies to WASM and execute in-process. Rejected because WASM bundle management and versioning adds complexity vs TypeScript functions for simple rules. Consider for production if policy isolation is critical.
+- **AWS Cedar**: Newer policy language with strong typing. Rejected due to immaturity of ecosystem and lack of TypeScript SDK maturity.
+
+**Trade-offs Accepted**:
+- Migrating from embedded evaluator to OPA requires policy rewriting (TypeScript → Rego)
+- Hybrid approach means two policy execution paths to maintain and audit
+
+---
+
+### 4. Event/Audit Storage: Same DB vs Separate Append-Only Store
+
+**Decision**: **Same PostgreSQL database with dedicated audit schema and time-series optimizations**
+
+**Rationale**:
+- **Operational Simplicity**: Single database reduces deployment complexity for prototype
+- **Transaction Safety**: Audit events and entity changes occur in same transaction, ensuring consistency (e.g., grant creation + audit event are atomic)
+- **Query Performance**: PostgreSQL with proper partitioning and indexing meets SC-012 requirement (audit queries < 10s for 90-day history)
+- **Retention Management**: PostgreSQL table partitioning by time range (monthly partitions) enables efficient archival and deletion
+- **Cost**: No additional infrastructure for separate event store
+
+**Implementation Plan**:
+1. **Schema Design**:
+   - `audit` schema separate from `public` schema for entity tables
+   - `audit.events` table with partitioning by `event_timestamp` (monthly partitions)
+   - Indexed columns: `event_type`, `actor_identity_id`, `resource_id`, `event_timestamp`
+2. **Append-Only Enforcement**:
+   - No UPDATE or DELETE grants on `audit.events` table
+   - PostgreSQL trigger prevents modifications (raises exception on UPDATE/DELETE)
+   - Zod validation ensures `event_id` is immutable
+3. **Retention Policy**:
+   - FR-029 + Assumption 7: minimum 90-day retention
+   - Archive partitions older than 90 days to cold storage (S3/file system) via scheduled job
+   - Optionally retain partitions up to 1 year for compliance requirements
+
+**Alternatives Considered**:
+- **EventStoreDB**: Purpose-built event store with immutable event streams. Rejected due to operational complexity (separate database to manage) and prototype scope. Consider for production if event sourcing patterns are adopted or if audit immutability guarantees need cryptographic verification.
+- **PostgreSQL with timescaledb extension**: Time-series database extension with better compression and partitioning for append-only workloads. Rejected because standard PostgreSQL partitioning is sufficient for prototype scale (90-day retention, estimated <10M events). Consider if audit volume exceeds 100M events.
+- **Separate audit database (PostgreSQL)**: Rejected because cross-database transactions are complex and atomic guarantees between entity changes and audit events are critical.
+
+**Trade-offs Accepted**:
+- Audit table growth may impact main database performance; mitigate with aggressive partitioning and archival
+- No built-in event stream capabilities (replay, projections); acceptable for audit log use case
+
+---
+
+### 5. Connector Framework Architecture: TypeScript Interfaces vs Plugin System
+
+**Decision**: **TypeScript interfaces with factory pattern and directory-based registration**
+
+**Rationale**:
+- **Type Safety**: TypeScript interfaces enforce connector contract at compile time
+- **Simplicity**: No dynamic plugin loading or runtime module resolution required for prototype
+- **Discoverability**: All connectors defined in `lib/connectors/` directory; registry imports and registers them explicitly
+- **Testing**: Contract testing via TypeScript interface ensures all connectors implement required methods
+- **Coverage Matrix Alignment**: Connector interface matches `connector_contracts.base_contract` defined in coverage-matrix.yaml
+
+**Implementation Plan**:
+1. **Base Interface** (`lib/connectors/base/connector.interface.ts`):
+   ```typescript
+   export interface IConnector {
+     discoverAccounts(req: DiscoverAccountsRequest): Promise<DiscoverAccountsResponse>;
+     discoverEntitlements(req: DiscoverEntitlementsRequest): Promise<DiscoverEntitlementsResponse>;
+     discoverGrants(req: DiscoverGrantsRequest): Promise<DiscoverGrantsResponse>;
+     grantEntitlement(req: GrantEntitlementRequest): Promise<GrantEntitlementResponse>;
+     revokeEntitlement(req: RevokeEntitlementRequest): Promise<RevokeEntitlementResponse>;
+     getTaskStatus(req: GetTaskStatusRequest): Promise<GetTaskStatusResponse>;
+   }
+   ```
+2. **Connector Implementations**:
+   - `lib/connectors/ldap/ldap.connector.ts` implements `IConnector`
+   - `lib/connectors/scim/scim.connector.ts` implements `IConnector`
+   - `lib/connectors/k8s/k8s.connector.ts` implements `IConnector`
+3. **Connector Registry** (`lib/connectors/registry.ts`):
+   - Factory function `getConnector(systemId: string): IConnector`
+   - Looks up `System.connector_family` and instantiates appropriate connector class
+   - Caches connector instances per system
+
+**Alternatives Considered**:
+- **Dynamic Plugin Loading**: Runtime loading of connector modules via `import()` or Node.js `require()`. Rejected because prototype has fixed set of connectors (LDAP, SCIM, K8s per phase_1_inventory). Consider for production if third-party connector support is needed.
+- **Decorator-based Plugin System**: Use TypeScript decorators to auto-register connectors. Rejected due to complexity and unclear benefits for prototype scope.
+
+**Trade-offs Accepted**:
+- Adding new connector requires code change (import in registry); acceptable for prototype
+- No hot-reloading of connectors; requires application restart
+
+---
+
+### 6. Time-Bound Grant Enforcement: Background Job Scheduler vs Next.js Cron vs External Scheduler
+
+**Decision**: **Vercel Cron (Next.js API Route with cron schedule) for Vercel deployments, node-cron for self-hosted**
+
+**Rationale**:
+- **Vercel Integration**: Vercel Cron provides zero-config cron jobs via Next.js API Routes with `export const config = { cron: '...' }`
+- **Simplicity**: No external scheduler infrastructure (no Kubernetes CronJobs, no separate worker process)
+- **Reliability**: Vercel Cron has built-in retry and monitoring; node-cron for self-hosted is lightweight and proven
+- **Compliance**: SC-007 requires 1-hour expiry enforcement; hourly cron schedule is sufficient
+
+**Implementation Plan**:
+1. **Expiry Enforcement Job**:
+   - Route: `app/api/cron/enforce-expiry/route.ts`
+   - Vercel config: `export const config = { cron: '0 * * * *' }` (every hour at minute 0)
+   - Self-hosted: `lib/jobs/enforce-expiry.job.ts` with node-cron scheduler in `lib/jobs/scheduler.ts`
+2. **Logic**:
+   - Query grants with `end_time < NOW() AND state = 'active'`
+   - Update grant state to `expired`
+   - Create revocation tasks for provisioner
+   - Emit audit events
+3. **Authentication**:
+   - Vercel Cron: secured via `CRON_SECRET` environment variable (Vercel automatically provides this header)
+   - Self-hosted: internal-only endpoint, no external exposure
+
+**Additional Scheduled Jobs**:
+- **Identity Sync from HRIS** (FR-003): `api/cron/sync-identities/route.ts` (every 15 minutes per SC-003)
+- **Reconciliation** (FR-023): `api/cron/reconcile-grants/route.ts` (configurable, default: every 6 hours per defaults.reconciliation)
+- **Audit Partition Archival**: `api/cron/archive-audit/route.ts` (daily)
+
+**Alternatives Considered**:
+- **AWS EventBridge/CloudWatch Events**: Cloud-native cron scheduler. Rejected because it couples deployment to AWS; Vercel Cron is platform-agnostic.
+- **Bull/BullMQ Job Queue**: Redis-backed job queue with cron support. Rejected due to operational complexity (requires Redis) for simple hourly jobs. Consider if job volume increases or complex retry logic is needed.
+- **GitHub Actions scheduled workflows**: Use GitHub Actions cron to trigger API endpoint. Rejected due to unreliability (GitHub Actions cron is not guaranteed to run on time, can delay up to 10+ minutes).
+
+**Trade-offs Accepted**:
+- Vercel Cron has maximum execution time of 60s (Hobby), 300s (Pro); mitigate by batching grant updates and using cursor-based pagination
+- No job queue persistence; if job fails, retry happens on next cron trigger (acceptable for hourly enforcement)
+
+---
+
+### 7. Credential Storage for Connectors: Environment Variables vs OpenBao/Vault
+
+**Decision**: **Environment variables for prototype, OpenBao integration prepared for production**
+
+**Rationale**:
+- **Prototype Pragmatism**: Environment variables (`.env.local`, Vercel Environment Variables) are sufficient for initial LDAP/SCIM/K8s connector credentials
+- **Security Baseline**: Next.js API Routes run server-side; credentials never exposed to client
+- **Production Path**: OpenBao (Vault fork) integration planned per coverage-matrix.yaml (connector family: `secrets_openbao`)
+- **Constitution Compliance**: Meets "Credential Storage: encrypted at rest; support for external secret management" requirement by preparing integration path
+
+**Implementation Plan**:
+1. **Phase 1 (Prototype)**:
+   - Store credentials in environment variables:
+     - `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`
+     - `SCIM_API_KEY`
+     - `K8S_SERVICE_ACCOUNT_TOKEN`
+   - Connectors read credentials via `process.env.LDAP_BIND_PASSWORD`
+   - Vercel encrypts environment variables at rest
+2. **Phase 2 (Production Preparation)**:
+   - Create `lib/secrets/secrets-client.ts` abstraction:
+     ```typescript
+     export interface ISecretsClient {
+       getSecret(path: string): Promise<string>;
+     }
+     export class EnvSecretsClient implements ISecretsClient { /* reads process.env */ }
+     export class OpenBaoSecretsClient implements ISecretsClient { /* calls OpenBao API */ }
+     ```
+   - Connectors inject `ISecretsClient` via constructor
+   - Toggle implementation via `SECRETS_PROVIDER` environment variable
+
+**Alternatives Considered**:
+- **HashiCorp Vault**: Industry standard for secrets management. Rejected because OpenBao is OSS fork after Vault license change to BSL; aligns with project's OSS-first approach.
+- **AWS Secrets Manager**: Cloud-native secrets storage. Rejected to avoid cloud vendor lock-in.
+- **Encrypted files**: Store credentials in encrypted JSON files committed to repo. Rejected due to poor key rotation story and higher risk of accidental exposure.
+
+**Trade-offs Accepted**:
+- Environment variables are static; credential rotation requires application restart (acceptable for prototype)
+- No automatic secret rotation; manual process for prototype phase
+
+---
+
+## Summary of Decisions
+
+| Research Item | Decision | Rationale (One-Liner) |
+|---------------|----------|----------------------|
+| ORM | **Prisma** | Best TypeScript DX and graph relation queries for IGA data model |
+| Database | **PostgreSQL + Apache AGE** | Unified storage for entities + graph queries, excellent Prisma support |
+| Policy Engine | **Hybrid: Embedded evaluator + OPA HTTP** | Simple rules embedded, complex policies via OPA when needed |
+| Audit Storage | **Same PostgreSQL DB (dedicated schema)** | Transactional consistency, sufficient performance with partitioning |
+| Connector Framework | **TypeScript interfaces + factory** | Compile-time type safety, no runtime plugin complexity |
+| Time-Bound Enforcement | **Vercel Cron / node-cron** | Zero-config for Vercel, lightweight for self-hosted |
+| Credential Storage | **Env vars (prototype) → OpenBao (production)** | Pragmatic prototype path with clear production upgrade |
+
+---
+
+## Technology Stack Finalized
+
+**Updated Technical Context** (resolves all NEEDS CLARIFICATION):
+
+**Language/Version**: TypeScript 5.x with Next.js 14+ (App Router)
+**Primary Dependencies**: Next.js, NextAuth.js, **Prisma ORM**, **PostgreSQL 16 with Apache AGE**
+**Storage**: PostgreSQL with `public` schema (entities) + `audit` schema (events), time-series partitioning
+**Testing**: Vitest (unit/integration), Playwright (E2E), contract tests for connectors
+**Target Platform**: Node.js 20+, Vercel (primary) or self-hosted Docker
+**Policy Engine**: Embedded TypeScript evaluator (Phase 1) + OPA HTTP (Phase 2+)
+**Event Bus**: In-process event emitter with PostgreSQL audit log persistence
+**Connector Framework**: TypeScript interface-based with factory pattern
+**Scheduled Jobs**: Vercel Cron (Vercel deployments) or node-cron (self-hosted)
+**Credential Storage**: Environment variables (prototype), OpenBao integration prepared (production)
+
+---
+
+## Next Steps
+
+- [x] Research complete (all NEEDS CLARIFICATION resolved)
+- [ ] Phase 1: Generate `data-model.md` (database schema + entity design)
+- [ ] Phase 1: Generate `contracts/` (OpenAPI spec for API Routes)
+- [ ] Phase 1: Generate `quickstart.md` (developer onboarding)
+- [ ] Phase 1: Update agent context with finalized technology stack
+- [ ] Re-evaluate Constitution Check with design artifacts
