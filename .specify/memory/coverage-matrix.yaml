@@ -1,4 +1,4 @@
-# coverage-matrix-v2.1.yaml
+# coverage-matrix-v2.2.yaml
 # Purpose:
 #   Canonical taxonomy + connector guidance for an IGA that models
 #   AccountType × EntitlementType with recommended OSS "actuators" and
@@ -9,9 +9,15 @@
 #   - "connector_family" is the protocol/pattern you implement once and reuse.
 #   - Cells can be "provisionable", "discoverable", or "evidence_only".
 #   - Keep target-specific connectors thin by mapping them into these families.
+#
+# v2.2 Additions:
+#   - connector_contracts: canonical request/response shapes per connector family
+#   - example_targets: real OSS systems mapped into account/entitlement patterns
+#   - grant_model: explicit grant semantics per cell
+#   - mvp_checklist: phased implementation roadmap
 
-version: "2.1"
-date: "2025-12-20"
+version: "2.2"
+date: "2025-12-21"
 owner: "IGA-Core"
 
 oss_components:
@@ -175,6 +181,144 @@ connector_families:
     provisioning: []
     typical_targets: ["file_acls", "some_conditional_access"]
     notes: "Model as entitlement evidence when no safe actuator exists."
+
+# -------------------------------------------------------------------
+# Connector Contracts: Canonical API shapes for IGA core integration
+# -------------------------------------------------------------------
+connector_contracts:
+  # A "contract" is the canonical interface your IGA core speaks.
+  # Every target adapter implements the contract for its connector_family.
+  common_types:
+    Account:
+      fields: ["account_id", "system_id", "account_type", "native_id", "status", "attributes", "last_seen"]
+    Entitlement:
+      fields: ["entitlement_id", "system_id", "entitlement_type", "native_id", "display_name", "shape", "risk"]
+    Grant:
+      fields: ["grant_id", "account_id", "entitlement_id", "grant_type", "start_time", "end_time", "state"]
+    Evidence:
+      fields: ["evidence_id", "kind", "ref", "collected_at", "hash?", "notes?"]
+
+  base_contract:
+    discover_accounts:
+      request:
+        fields: ["system_id", "account_type", "cursor?", "page_size?", "filter?"]
+      response:
+        fields: ["accounts[]:Account", "next_cursor?", "watermark?"]
+    discover_entitlements:
+      request:
+        fields: ["system_id", "entitlement_type", "cursor?", "page_size?", "filter?"]
+      response:
+        fields: ["entitlements[]:Entitlement", "next_cursor?", "watermark?"]
+    discover_grants:
+      request:
+        fields: ["system_id", "account_ids?", "entitlement_ids?", "cursor?", "page_size?"]
+      response:
+        fields: ["grants[]:Grant", "next_cursor?", "watermark?"]
+    grant_entitlement:
+      request:
+        fields: ["system_id", "account_native_id", "entitlement_native_id", "assignment_id", "time_bound?"]
+      response:
+        fields: ["provisioning_task_id", "state", "evidence[]?:Evidence"]
+    revoke_entitlement:
+      request:
+        fields: ["system_id", "account_native_id", "entitlement_native_id", "assignment_id"]
+      response:
+        fields: ["provisioning_task_id", "state", "evidence[]?:Evidence"]
+    get_task_status:
+      request:
+        fields: ["system_id", "provisioning_task_id"]
+      response:
+        fields: ["state", "updated_at", "error?", "evidence[]?:Evidence"]
+
+  family_overrides:
+    ldap:
+      mapping_notes:
+        accounts: "LDAP entries of objectClass inetOrgPerson/user/etc."
+        entitlements: "Group entries + role objects."
+        grants: "Membership attributes (member/memberOf)."
+      filters_supported: ["ldap_filter", "base_dn", "object_class"]
+      evidence:
+        kinds: ["ldap_modify", "ldap_entry_snapshot"]
+    scim:
+      mapping_notes:
+        accounts: "SCIM Users"
+        entitlements: "SCIM Groups (and sometimes vendor roles/licensing via extensions)"
+        grants: "Group membership via SCIM PATCH"
+      filters_supported: ["scim_filter"]
+      evidence:
+        kinds: ["http_request_log", "scim_resource_etag"]
+    idp_admin:
+      mapping_notes:
+        accounts: "IdP Users"
+        entitlements: "Roles/Groups/ClientScopes"
+        grants: "User-role mappings; group memberships; client scope assignments"
+      filters_supported: ["search", "realm", "client_id"]
+      evidence:
+        kinds: ["admin_api_audit", "http_request_log"]
+    k8s_api:
+      mapping_notes:
+        accounts: "ServiceAccount objects"
+        entitlements: "Role/ClusterRole/Issuer/Policy CRDs"
+        grants: "RoleBinding/ClusterRoleBinding; refs between objects"
+      filters_supported: ["namespace", "label_selector", "field_selector"]
+      evidence:
+        kinds: ["manifest_applied", "object_uid", "resource_version"]
+    sql:
+      mapping_notes:
+        accounts: "DB users/roles"
+        entitlements: "Privileges or role memberships modeled as entitlements"
+        grants: "GRANT statements"
+      filters_supported: ["schema", "role", "object"]
+      evidence:
+        kinds: ["sql_statement", "catalog_snapshot"]
+    iac_opentofu:
+      mapping_notes:
+        accounts: "Principals in IaC (users, roles, service principals)"
+        entitlements: "Policies/role assignments/permission sets"
+        grants: "Desired state associations"
+      filters_supported: ["workspace", "stack", "module"]
+      evidence:
+        kinds: ["plan", "apply", "state_snapshot"]
+    policy_opa:
+      mapping_notes:
+        accounts: "Often not applicable; treat policy refs as entitlements and bind identities in IGA"
+        entitlements: "Bundles/packages + metadata"
+        grants: "Assignment means 'policy in effect' for a target boundary"
+      filters_supported: ["bundle_name", "package"]
+      evidence:
+        kinds: ["bundle_hash", "publish_receipt"]
+    rebac_fga:
+      mapping_notes:
+        accounts: "Subjects (user:123, service:abc) typically come from your identities/accounts"
+        entitlements: "Relations or computed permissions"
+        grants: "Tuples written to store"
+      filters_supported: ["object_type", "relation", "subject_type"]
+      evidence:
+        kinds: ["tuple_write_receipt"]
+    secrets_openbao:
+      mapping_notes:
+        accounts: "Entities or auth methods; often identities are external and policies are entitlements"
+        entitlements: "Policies, roles, mounts"
+        grants: "Policy attachments; leases as operational evidence"
+      filters_supported: ["path_prefix", "mount"]
+      evidence:
+        kinds: ["policy_snapshot", "lease_id", "rotation_event"]
+    pki_ca:
+      mapping_notes:
+        accounts: "Subjects/provisioners/templates"
+        entitlements: "Issuance rights constraints"
+        grants: "Provisioner/template association or policy update"
+      filters_supported: ["provisioner", "template"]
+      evidence:
+        kinds: ["ca_policy_snapshot", "cert_serial", "revocation_receipt"]
+    workload_spire:
+      mapping_notes:
+        accounts: "SPIFFE IDs / workload selectors"
+        entitlements: "Registration entry constraints"
+        grants: "Registration entry existence and selectors"
+      filters_supported: ["spiffe_id_prefix", "selector"]
+      evidence:
+        kinds: ["registration_entry_snapshot"]
 
 entitlement_types:
   group:
@@ -341,32 +485,40 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: ldap
     oss_components: [openldap, freeipa, connid, openicf]
+    grant_model: "membership"
     discovery_notes: "Search groups; read member/memberOf; handle nested groups if needed."
     provision_notes: "Modify group membership (add/remove DN)."
+    notes: "Primary enterprise baseline: directory user ↔ group membership."
 
   - account_type: ldap_user
     entitlement_type: role
     support: { discoverable: true, provisionable: true }
     connector_family: ldap
     oss_components: [openldap, freeipa, connid, openicf]
+    grant_model: "membership_or_attribute"
     discovery_notes: "If roles modeled as LDAP entries, treat similarly to groups."
     provision_notes: "Modify role membership attributes."
+    notes: "Role objects vary by schema; treat as group-like when possible."
 
   - account_type: ldap_user
     entitlement_type: policy_document
     support: { discoverable: true, provisionable: true }
     connector_family: ldap
     oss_components: [freeipa]
+    grant_model: "policy_association"
     discovery_notes: "FreeIPA HBAC/sudo rules may be represented via LDAP/API; normalize into policy_document."
     provision_notes: "Prefer FreeIPA API when available; LDAP fallback possible."
+    notes: "FreeIPA HBAC/sudo rules: normalize into policy_document with constraints."
 
   - account_type: ldap_user
     entitlement_type: resource_acl
     support: { discoverable: true, provisionable: false }
     connector_family: evidence_only
     oss_components: []
+    grant_model: "derived"
     discovery_notes: "File share ACLs often derived via groups; capture as evidence via external collectors."
     provision_notes: "Actuation usually via file system tooling; treat as external."
+    notes: "File share ACLs: often managed outside IGA; record evidence and source."
 
   # -------------------------
   # IdP Users (Keycloak/authentik)
@@ -376,6 +528,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: idp_admin
     oss_components: [keycloak, authentik]
+    grant_model: "membership"
     discovery_notes: "List groups; resolve membership; store group path."
     provision_notes: "Add/remove user to group via admin API."
 
@@ -384,6 +537,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: idp_admin
     oss_components: [keycloak, authentik]
+    grant_model: "assignment"
     discovery_notes: "Realm roles/client roles; include 'isPrivileged' tagging from config."
     provision_notes: "Assign/unassign roles via admin API."
 
@@ -392,6 +546,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: idp_admin
     oss_components: [keycloak]
+    grant_model: "policy_association"
     discovery_notes: "If using IdP-native authz policies; otherwise store OPA refs."
     provision_notes: "Manage policies if you adopt IdP-native authz; otherwise delegate to OPA."
 
@@ -403,6 +558,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: idp_admin
     oss_components: [keycloak, authentik]
+    grant_model: "client_scope_assignment"
     discovery_notes: "Discover allowed scopes/audiences; normalize into scope entitlements."
     provision_notes: "Grant/revoke scopes on client; enforce approvals for privileged scopes."
 
@@ -411,6 +567,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: idp_admin
     oss_components: [keycloak]
+    grant_model: "policy_association"
     discovery_notes: "Token rules/authz policies (if using IdP authorization services)."
     provision_notes: "Admin API mutations; or externalize to OPA."
 
@@ -422,6 +579,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: scim
     oss_components: [connid, openicf]
+    grant_model: "membership"
     discovery_notes: "SCIM Groups + membership; map group IDs to Entitlements."
     provision_notes: "SCIM PATCH add/remove members."
 
@@ -430,6 +588,7 @@ cells:
     support: { discoverable: true, provisionable: "depends" }
     connector_family: rest_generic
     oss_components: [connid, openicf]
+    grant_model: "assignment"
     discovery_notes: "Many SaaS expose roles via REST; SCIM role mgmt not consistent."
     provision_notes: "Implement per-SaaS REST adapter or actuate via IaC provider where available."
 
@@ -438,6 +597,7 @@ cells:
     support: { discoverable: true, provisionable: "depends" }
     connector_family: rest_generic
     oss_components: [connid, openicf]
+    grant_model: "assignment"
     discovery_notes: "Licenses/SKUs via SaaS API."
     provision_notes: "Often provisionable via REST; require cost center + approval."
 
@@ -446,6 +606,7 @@ cells:
     support: { discoverable: true, provisionable: "depends" }
     connector_family: rest_generic
     oss_components: []
+    grant_model: "assignment"
     discovery_notes: "Feature flags can be in app or separate platform; normalize as feature_flag."
     provision_notes: "Actuation varies; frequently app-specific."
 
@@ -454,6 +615,7 @@ cells:
     support: { discoverable: true, provisionable: "depends" }
     connector_family: rest_generic
     oss_components: []
+    grant_model: "assignment"
     discovery_notes: "Bot/integration users; treat ownerIdentityId as required."
     provision_notes: "Same as saas_user; add stronger governance (rotation, expiry)."
 
@@ -465,6 +627,7 @@ cells:
     support: { discoverable: true, provisionable: "depends" }
     connector_family: rest_generic
     oss_components: []
+    grant_model: "assignment"
     discovery_notes: "If the platform exposes API key permissions/scopes."
     provision_notes: "Prefer creating new key with desired scopes vs mutating existing where possible."
 
@@ -473,6 +636,7 @@ cells:
     support: { discoverable: true, provisionable: "depends" }
     connector_family: rest_generic
     oss_components: []
+    grant_model: "policy_attachment"
     discovery_notes: "Some systems attach policy docs/permission sets to keys."
     provision_notes: "System-specific; consider OpenTofu providers if available."
 
@@ -484,6 +648,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: iac_opentofu
     oss_components: [opentofu]
+    grant_model: "desired_state_attachment"
     discovery_notes: "Parse IaC state + cloud API drift checks; store policy attachments."
     provision_notes: "Change desired state; gated by IGA approvals/time-bound logic."
 
@@ -492,6 +657,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: iac_opentofu
     oss_components: [opentofu]
+    grant_model: "desired_state_binding"
     discovery_notes: "Discover role assignments/attachments."
     provision_notes: "IaC-based assignment."
 
@@ -500,6 +666,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: iac_opentofu
     oss_components: [opentofu]
+    grant_model: "desired_state_binding"
     discovery_notes: "Service principals often carry powerful roles; tag privileged."
     provision_notes: "IaC-based assignment with mandatory owner + expiry."
 
@@ -508,6 +675,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: iac_opentofu
     oss_components: [opentofu]
+    grant_model: "desired_state_attachment"
     discovery_notes: "Policy attachments/inline policies."
     provision_notes: "IaC; prefer managed policies for auditability."
 
@@ -516,6 +684,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: iac_opentofu
     oss_components: [opentofu]
+    grant_model: "desired_state_attachment"
     discovery_notes: "Role policy/trust policy are both policy_document entitlements."
     provision_notes: "IaC changes; record justification and ticketRef."
 
@@ -524,6 +693,7 @@ cells:
     support: { discoverable: true, provisionable: "depends" }
     connector_family: iac_opentofu
     oss_components: [opentofu]
+    grant_model: "desired_state_attachment"
     discovery_notes: "Some platforms model permission sets separately."
     provision_notes: "IaC if provider supports; else REST."
 
@@ -532,8 +702,10 @@ cells:
     support: { discoverable: true, provisionable: false }
     connector_family: evidence_only
     oss_components: []
+    grant_model: "derived"
     discovery_notes: "Treat sessions as derived accounts; discover via logs (cloudtrail-like) and role mappings."
     provision_notes: "Control by changing source role trust/policies (cloud_role cells)."
+    notes: "Control via the source role/trust policy cells."
 
   # -------------------------
   # Kubernetes
@@ -543,6 +715,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: k8s_api
     oss_components: []
+    grant_model: "binding_object"
     discovery_notes: "List RoleBindings/ClusterRoleBindings referencing the SA."
     provision_notes: "Apply/patch/delete binding manifests."
 
@@ -551,6 +724,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: policy_opa
     oss_components: [opa]
+    grant_model: "policy_association"
     discovery_notes: "If cluster uses OPA/Gatekeeper-style policies; model as policy refs/bundles."
     provision_notes: "Publish/revoke bundles; treat policies as entitlements with owners."
 
@@ -559,6 +733,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: k8s_api
     oss_components: [cert_manager]
+    grant_model: "crd_association"
     discovery_notes: "Discover CertificateRequests/Issuers tied to namespaces/identities (implementation-specific)."
     provision_notes: "Grant by applying Issuer/Certificate templates or approving requests depending on setup."
 
@@ -570,6 +745,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: workload_spire
     oss_components: [spire]
+    grant_model: "registration_entry"
     discovery_notes: "SPIRE registration entries define what identities can receive SVIDs."
     provision_notes: "Create/update/delete registration entries; enforce TTL/expiry."
 
@@ -578,6 +754,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: policy_opa
     oss_components: [opa]
+    grant_model: "policy_association"
     discovery_notes: "Use OPA for service-to-service allow rules (or mesh-native policy)."
     provision_notes: "Publish policies as entitlements; reference SPIFFE selectors in conditions."
 
@@ -589,6 +766,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: pki_ca
     oss_components: [step_ca]
+    grant_model: "provisioner_policy"
     discovery_notes: "Discover provisioners/templates/constraints; map to entitlement constraints."
     provision_notes: "Update provisioner policy; approvals mandatory for broad SAN rights."
 
@@ -597,6 +775,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: pki_ca
     oss_components: [step_ca]
+    grant_model: "policy_association"
     discovery_notes: "Issuance policies/config refs captured as policy_document."
     provision_notes: "Change CA policy in controlled manner; record evidence."
 
@@ -608,6 +787,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: secrets_openbao
     oss_components: [openbao]
+    grant_model: "policy_attachment"
     discovery_notes: "Service account keys stored/rotated in OpenBao; access defined by policy."
     provision_notes: "Write/delete policies; rotate/revoke leases when entitlements removed."
 
@@ -616,6 +796,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: secrets_openbao
     oss_components: [openbao]
+    grant_model: "policy_attachment"
     discovery_notes: "If using dynamic DB creds, the 'right' is OpenBao role/policy rather than static DB grant."
     provision_notes: "Grant by assigning OpenBao policy/role; revoke by policy removal and lease revoke."
 
@@ -627,6 +808,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: sql
     oss_components: []
+    grant_model: "grant_statement"
     discovery_notes: "Introspect information_schema / catalogs."
     provision_notes: "GRANT/REVOKE privileges; consider pairing with OpenBao for rotation."
 
@@ -635,6 +817,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: sql
     oss_components: []
+    grant_model: "role_membership_and_privs"
     discovery_notes: "Role membership + object privileges."
     provision_notes: "GRANT role to user; manage role privilege sets."
 
@@ -646,6 +829,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: rebac_fga
     oss_components: [openfga, spicedb]
+    grant_model: "tuple"
     discovery_notes: "Tuples define access: (object, relation, subject)."
     provision_notes: "Write/delete tuples; time-bound by storing expiry in IGA assignment and enforcing via periodic reconciliation."
 
@@ -654,6 +838,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: rebac_fga
     oss_components: [openfga, spicedb]
+    grant_model: "tuple"
     discovery_notes: "Same as above; require ownerIdentityId."
     provision_notes: "Same as above; stronger guardrails."
 
@@ -662,6 +847,7 @@ cells:
     support: { discoverable: true, provisionable: true }
     connector_family: policy_opa
     oss_components: [opa]
+    grant_model: "policy_association"
     discovery_notes: "Use when app uses OPA for authz decisions."
     provision_notes: "Publish bundles; tie bundle refs to entitlements."
 
@@ -673,6 +859,7 @@ cells:
     support: { discoverable: true, provisionable: false }
     connector_family: evidence_only
     oss_components: []
+    grant_model: "derived"
     discovery_notes: "Discover via agent or config mgmt export; normalize local admin membership."
     provision_notes: "Actuate via config management later (out of scope for lightweight MVP)."
 
@@ -681,6 +868,7 @@ cells:
     support: { discoverable: true, provisionable: false }
     connector_family: evidence_only
     oss_components: []
+    grant_model: "derived"
     discovery_notes: "sudoers / local policies captured as evidence."
     provision_notes: "Actuate via config management later."
 
@@ -706,10 +894,168 @@ defaults:
       - "record_evidence"
       - "optionally_revert_if_managed"
   modeling_conventions:
-    - "Prefer Entitlement objects for anything grantable, even if evidence-only."
-    - "Model nested/derived grants explicitly with grantType=derived and store source references."
-    - "When actuation is IaC, store plan/apply metadata as Evidence on AccessAssignment."
+    - "Treat entitlements as objects even when evidence-only."
+    - "Record derived grants with grantType=derived + source refs."
+    - "When actuation is IaC, store plan/apply/state pointers as Evidence."
+    - "Time-bound access is enforced by IGA reconciliation if target lacks native expiry."
 
+# -------------------------------------------------------------------
+# Example Targets: Real OSS systems mapped into the matrix
+# -------------------------------------------------------------------
+example_targets:
+  # Directories
+  - target_id: "tgt_openldap"
+    name: "OpenLDAP"
+    system_type: "directory"
+    connector_family: "ldap"
+    oss_components: ["openldap"]
+    typical_account_types: ["ldap_user"]
+    typical_entitlement_types: ["group", "role"]
+    notes: "Canonical directory integration; groups via member/memberOf patterns."
+
+  - target_id: "tgt_freeipa"
+    name: "FreeIPA"
+    system_type: "directory"
+    connector_family: "ldap"
+    oss_components: ["freeipa"]
+    typical_account_types: ["ldap_user"]
+    typical_entitlement_types: ["group", "role", "policy_document"]
+    notes: "Adds sudo/HBAC-style policy entitlements."
+
+  # IdP
+  - target_id: "tgt_keycloak"
+    name: "Keycloak"
+    system_type: "idp"
+    connector_family: "idp_admin"
+    oss_components: ["keycloak"]
+    typical_account_types: ["idp_user", "oauth_client"]
+    typical_entitlement_types: ["group", "role", "scope", "policy_document"]
+    notes: "Great reference target for federated roles, group claims, client scopes."
+
+  - target_id: "tgt_authentik"
+    name: "authentik"
+    system_type: "idp"
+    connector_family: "idp_admin"
+    oss_components: ["authentik"]
+    typical_account_types: ["idp_user", "oauth_client"]
+    typical_entitlement_types: ["group", "role", "scope"]
+    notes: "Similar integration surface; flows can be modeled as policy_document if desired."
+
+  # Policy / AuthZ control planes
+  - target_id: "tgt_opa"
+    name: "Open Policy Agent"
+    system_type: "policy_engine"
+    connector_family: "policy_opa"
+    oss_components: ["opa"]
+    typical_account_types: []
+    typical_entitlement_types: ["policy_document"]
+    notes: "Entitlements are policy bundles/refs; grants are IGA assignments to boundaries/targets."
+
+  - target_id: "tgt_openfga"
+    name: "OpenFGA"
+    system_type: "rebac"
+    connector_family: "rebac_fga"
+    oss_components: ["openfga"]
+    typical_account_types: ["saas_user", "saas_service_account"]
+    typical_entitlement_types: ["rebac_relation"]
+    notes: "Model resource-level access as tuples; your IGA governs tuple lifecycle."
+
+  - target_id: "tgt_spicedb"
+    name: "SpiceDB"
+    system_type: "rebac"
+    connector_family: "rebac_fga"
+    oss_components: ["spicedb"]
+    typical_account_types: ["saas_user", "saas_service_account"]
+    typical_entitlement_types: ["rebac_relation"]
+    notes: "Same Zanzibar-like pattern; pick one control plane."
+
+  # Secrets
+  - target_id: "tgt_openbao"
+    name: "OpenBao"
+    system_type: "secrets"
+    connector_family: "secrets_openbao"
+    oss_components: ["openbao"]
+    typical_account_types: ["saas_service_account", "db_user"]
+    typical_entitlement_types: ["policy_document"]
+    notes: "Use for dynamic creds + policy gating; leases become evidence."
+
+  # Kubernetes + PKI automation
+  - target_id: "tgt_kubernetes"
+    name: "Kubernetes"
+    system_type: "kubernetes"
+    connector_family: "k8s_api"
+    oss_components: []
+    typical_account_types: ["k8s_service_account"]
+    typical_entitlement_types: ["rbac_binding", "policy_document", "certificate_right"]
+    notes: "RBAC bindings are grants; cert-manager adds certificate CRDs."
+
+  - target_id: "tgt_cert_manager"
+    name: "cert-manager"
+    system_type: "pki_automation"
+    connector_family: "k8s_api"
+    oss_components: ["cert_manager"]
+    typical_account_types: ["k8s_service_account"]
+    typical_entitlement_types: ["certificate_right"]
+    notes: "Certificate issuance rights modeled via Issuer/Certificate policy patterns."
+
+  - target_id: "tgt_step_ca"
+    name: "step-ca"
+    system_type: "ca"
+    connector_family: "pki_ca"
+    oss_components: ["step_ca"]
+    typical_account_types: ["cert_subject"]
+    typical_entitlement_types: ["certificate_right", "policy_document"]
+    notes: "Provisioners/templates define who can request which certs."
+
+  # Workload identity
+  - target_id: "tgt_spire"
+    name: "SPIRE"
+    system_type: "workload_identity"
+    connector_family: "workload_spire"
+    oss_components: ["spire"]
+    typical_account_types: ["spiffe_workload"]
+    typical_entitlement_types: ["certificate_right"]
+    notes: "Registration entries are the grant surface; selectors are constraints."
+
+  # IaC actuator (cloud-ish)
+  - target_id: "tgt_opentofu"
+    name: "OpenTofu"
+    system_type: "iac"
+    connector_family: "iac_opentofu"
+    oss_components: ["opentofu"]
+    typical_account_types: ["cloud_service_principal", "cloud_role", "cloud_iam_user"]
+    typical_entitlement_types: ["policy_document", "role", "permission_set"]
+    notes: "Use as actuator for providers; IGA wraps approval/evidence/time-bound logic."
+
+  # Databases
+  - target_id: "tgt_postgres"
+    name: "PostgreSQL"
+    system_type: "database"
+    connector_family: "sql"
+    oss_components: []
+    typical_account_types: ["db_user", "db_role"]
+    typical_entitlement_types: ["db_privilege"]
+    notes: "Direct GRANT/REVOKE; optionally pair with OpenBao for dynamic creds."
+
+# -------------------------------------------------------------------
+# MVP Checklist: Phased implementation roadmap
+# -------------------------------------------------------------------
+mvp_checklist:
+  phase_1_inventory:
+    - { connector_family: "ldap", cells: ["ldap_user×group"] }
+    - { connector_family: "idp_admin", cells: ["idp_user×role", "idp_user×group", "oauth_client×scope"] }
+    - { connector_family: "k8s_api", cells: ["k8s_service_account×rbac_binding"] }
+  phase_2_governance:
+    - { features: ["request/approve", "time-bound", "attestation-lite", "evidence trail"] }
+  phase_3_actuation:
+    - { connector_family: "scim", cells: ["saas_user×group"] }
+    - { connector_family: "secrets_openbao", cells: ["saas_service_account×policy_document"] }
+    - { connector_family: "iac_opentofu", cells: ["cloud_role×policy_document"] }
+  phase_4_fine_grained:
+    - { connector_family: "rebac_fga", cells: ["saas_user×rebac_relation"] }
+    - { connector_family: "policy_opa", cells: ["policy_document everywhere"] }
+
+# Legacy roadmap hints (preserved for backward compatibility)
 roadmap_hints:
   mvp_order:
     - "ldap: ldap_user×group"
