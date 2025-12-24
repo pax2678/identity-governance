@@ -16,7 +16,10 @@ This guide helps developers onboard to the IGA prototype project. Follow these s
 - **Node.js**: 20.x or later ([download](https://nodejs.org/))
 - **PostgreSQL**: 16+ with Apache AGE extension ([installation guide](#database-setup))
 - **Git**: For version control
-- **Code Editor**: VS Code recommended (with Prisma extension)
+- **Code Editor**: VS Code recommended with extensions:
+  - [Prisma](https://marketplace.visualstudio.com/items?itemName=Prisma.prisma) for database schema
+  - [Tailwind CSS IntelliSense](https://marketplace.visualstudio.com/items?itemName=bradlc.vscode-tailwindcss) for Tailwind autocomplete
+  - [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) for code linting
 
 ---
 
@@ -111,7 +114,33 @@ npx prisma generate
 npx prisma migrate dev --name init
 ```
 
-### 6. Start Development Server
+### 6. Initialize shadcn/ui + Tailwind CSS
+
+```bash
+# Initialize shadcn/ui (automatically configures Tailwind CSS)
+npx shadcn-ui@latest init
+
+# When prompted, select:
+# - Style: Default
+# - Base color: Slate (professional for IGA dashboards)
+# - CSS variables: Yes (easier theming)
+
+# Add core components for Phase 1 (P1-P3: Discovery)
+npx shadcn-ui@latest add button card table input badge dropdown-menu
+
+# Add governance components for Phase 2 (P4-P6: Workflows)
+npx shadcn-ui@latest add form dialog alert-dialog tabs progress checkbox date-picker select popover
+```
+
+**What this creates**:
+- `components/ui/` directory with shadcn components (copy-pasted, fully owned)
+- `lib/utils.ts` with `cn()` helper for Tailwind class merging
+- `tailwind.config.ts` configuration file
+- `postcss.config.js` for PostCSS configuration
+- `components.json` shadcn CLI configuration
+- `styles/globals.css` updated with Tailwind directives
+
+### 7. Start Development Server
 
 ```bash
 npm run dev
@@ -127,14 +156,19 @@ See [plan.md](plan.md#project-structure) for detailed directory tree. Key direct
 
 - **`app/`**: Next.js App Router (pages + API routes)
   - `app/api/`: REST API endpoints (Identity Registry, Governance, Connectors)
-  - `app/(dashboard)/`: Admin dashboard UI
-  - `app/(portal)/`: Self-service portal UI
+  - `app/(dashboard)/`: Admin dashboard UI (uses shadcn/ui components)
+  - `app/(portal)/`: Self-service portal UI (uses shadcn/ui components)
+- **`components/`**: UI components
+  - `components/ui/`: shadcn/ui primitives (button, card, table, form, dialog, etc.)
 - **`lib/`**: Shared business logic
   - `lib/db/`: Prisma schema and database client
   - `lib/models/`: Domain model TypeScript types (Zod validation)
   - `lib/services/`: Business logic services (identity, governance, provisioning)
   - `lib/connectors/`: Connector framework (LDAP, SCIM, K8s)
   - `lib/policy/`: Policy evaluation (embedded + OPA integration)
+  - `lib/utils/`: Utility functions (graph queries, validation, cn() helper)
+- **`styles/`**: Global styles
+  - `styles/globals.css`: Tailwind CSS directives + custom styles
 - **`tests/`**: Unit, integration, and E2E tests
 - **`specs/001-iga-core-data-model/`**: Feature documentation
   - [spec.md](spec.md): Feature specification (user stories, requirements)
@@ -350,6 +384,130 @@ for (const entitlement of entitlements) {
 }
 ```
 
+### 5. UI Components (shadcn/ui + Tailwind CSS)
+
+**Problem**: Building accessible, consistent UI components for admin dashboards and self-service portals.
+
+**Solution**: shadcn/ui components (copy-pasted primitives) + Tailwind CSS utility-first styling.
+
+**Code Location**: [components/ui/](../../components/ui/), feature components in route-level `components/` directories
+
+**Example (Identity Table Component)**:
+
+```typescript
+// app/(dashboard)/identities/components/identity-table.tsx
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+
+export function IdentityTable({ identities }: { identities: Identity[] }) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Display Name</TableHead>
+          <TableHead>Type</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {identities.map((identity) => (
+          <TableRow key={identity.id}>
+            <TableCell className="font-medium">{identity.displayName}</TableCell>
+            <TableCell>
+              <Badge variant="outline">{identity.type}</Badge>
+            </TableCell>
+            <TableCell>
+              <Badge
+                variant={identity.status === 'ACTIVE' ? 'default' : 'destructive'}
+              >
+                {identity.status}
+              </Badge>
+            </TableCell>
+            <TableCell>
+              <Button variant="ghost" size="sm">View</Button>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+```
+
+**Example (Access Request Form)**:
+
+```typescript
+// app/(dashboard)/access-requests/components/request-form.tsx
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
+
+const requestSchema = z.object({
+  subjectId: z.string().uuid(),
+  targetId: z.string().uuid(),
+  justification: z.string().min(10, 'Justification must be at least 10 characters'),
+});
+
+export function RequestForm() {
+  const form = useForm({
+    resolver: zodResolver(requestSchema),
+  });
+
+  async function onSubmit(data: z.infer<typeof requestSchema>) {
+    await fetch('/api/access-requests', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <FormField
+          control={form.control}
+          name="justification"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Justification</FormLabel>
+              <FormControl>
+                <Textarea
+                  placeholder="Why do you need this access?"
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <Button type="submit">Submit Request</Button>
+      </form>
+    </Form>
+  );
+}
+```
+
+**Tailwind CSS Utilities**:
+
+```typescript
+// Using Tailwind utility classes for responsive layouts
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  {/* Cards automatically adapt to screen size */}
+</div>
+
+// Dark mode support (optional Phase 2)
+<div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50">
+  {/* Automatically switches colors in dark mode */}
+</div>
+```
+
+**Component Documentation**: See [shadcn/ui docs](https://ui.shadcn.com) for all available components.
+
 ---
 
 ## API Endpoints Reference
@@ -511,6 +669,10 @@ npx prisma migrate deploy
 - **Prisma Documentation**: [prisma.io/docs](https://www.prisma.io/docs)
 - **Apache AGE Documentation**: [age.apache.org](https://age.apache.org)
 - **NextAuth.js Guide**: [next-auth.js.org](https://next-auth.js.org)
+- **shadcn/ui Documentation**: [ui.shadcn.com](https://ui.shadcn.com) - Component library
+- **Tailwind CSS Documentation**: [tailwindcss.com/docs](https://tailwindcss.com/docs) - Utility-first CSS
+- **Radix UI Primitives**: [radix-ui.com](https://www.radix-ui.com) - Unstyled accessible components (shadcn/ui foundation)
+- **React Hook Form**: [react-hook-form.com](https://react-hook-form.com) - Form validation (used with shadcn forms)
 - **Coverage Matrix**: [.specify/memory/coverage-matrix.yaml](../../../.specify/memory/coverage-matrix.yaml)
 - **Project Constitution**: [.specify/memory/constitution.md](../../../.specify/memory/constitution.md)
 
