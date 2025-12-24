@@ -257,8 +257,100 @@ model Entitlement {
 - `shape` JSON schema varies by `entitlementType`:
   - `group`: `{ path: string, isNested: boolean }`
   - `role`: `{ scope: string, permissions: string[] }`
-  - `policy_document`: `{ policyArn: string, policyDoc: object }`
+  - `policy_document`: `{ policyLanguage: string, policyBundle: string, evaluationEndpoint?: string }` (see Policy Modeling section below)
   - `scope`: `{ audience: string, claims: string[] }`
+
+**Policy Modeling: IGA-Evaluated vs Target-Evaluated Policies**
+
+This data model distinguishes between two types of policies based on **where policy evaluation occurs**:
+
+1. **IGA-Evaluated Policies** (Policy Entity - BIRTHRIGHT, SOD):
+   - Defined in the `Policy` table (see §9 below)
+   - Evaluated **proactively by the IGA system**
+   - Produce `AccountEntitlementGrant` records with `GrantType.POLICY_DERIVED`
+   - Examples: "All Finance identities get FinanceBaseRole", "Cannot have both PurchaseApprover + Vendor entitlements"
+   - Audit trail: Policy evaluation events logged in IGA audit system
+
+2. **Target-Evaluated Policies** (Entitlement with `entitlementType = 'policy_document'`):
+   - Modeled as **Entitlement records**, NOT Policy records
+   - Provisioned to target systems via connectors (policy_opa family per coverage-matrix.yaml)
+   - Evaluated **at runtime by target systems** during access requests
+   - Examples: OPA Rego bundles, AWS IAM policies, Azure ABAC conditions, Kubernetes RBAC policies
+   - Audit trail: Provisioning logged by IGA; access decisions logged by target system
+
+**Decision Criteria: When to Use Policy Entity vs policy_document Entitlement**
+
+| Criterion | Use Policy Entity (BIRTHRIGHT/SOD) | Use policy_document Entitlement |
+|-----------|-----------------------------------|--------------------------------|
+| **Evaluation Location** | IGA system evaluates proactively | Target system evaluates at runtime |
+| **Produces Grants?** | Yes (`POLICY_DERIVED` grants) | No (is itself a grant) |
+| **Modification Effect** | Triggers grant recalculation in IGA | Reprovisioned to target system |
+| **Audit Location** | IGA audit log | Target system logs (IGA logs provisioning only) |
+| **Example Use Cases** | Birthright rules, SoD constraints | OPA bundles, AWS IAM policies, Azure conditions |
+
+**policy_document Entitlement Type Details**
+
+The `policy_document` entitlement type is used for runtime-evaluated ABAC (Attribute-Based Access Control) policies provisioned to target systems. When granted to an account, the policy definition is pushed to the target system where it's evaluated during access requests.
+
+**Shape Schema for policy_document**:
+```typescript
+{
+  policyLanguage: "rego" | "iam_json" | "azure_abac" | "k8s_rbac",
+  policyBundle: string,        // Base64-encoded policy definition (Rego code, IAM JSON, etc.)
+  evaluationEndpoint?: string, // Optional: OPA endpoint path (e.g., "/v1/data/authz/allow")
+  policyId?: string,           // Optional: Native policy ID in target system
+  metadata?: object            // Optional: Additional connector-specific metadata
+}
+```
+
+**Examples of policy_document Entitlements**:
+
+1. **OPA Policy Bundle**:
+   ```typescript
+   {
+     id: "ent_opa_read_documents",
+     systemId: "sys_document_service",
+     entitlementType: "policy_document",
+     displayName: "OPA Policy: Read Documents",
+     shape: {
+       policyLanguage: "rego",
+       policyBundle: "cGFja2FnZSBhdXRoegphbGxvdyB7CiAgaW5wdXQudXNlci5kZXB0ID09ICJGaW5hbmNlIgogIGlucHV0LnJlc291cmNlLnR5cGUgPT0gImludm9pY2UiCn0=",
+       evaluationEndpoint: "/v1/data/authz/allow"
+     }
+   }
+   ```
+
+2. **AWS IAM Policy**:
+   ```typescript
+   {
+     id: "ent_aws_s3_read_finance",
+     systemId: "sys_aws_prod",
+     entitlementType: "policy_document",
+     displayName: "S3 Read Access - Finance Bucket",
+     shape: {
+       policyLanguage: "iam_json",
+       policyBundle: "ewogICJWZXJzaW9uIjogIjIwMTItMTAtMTciLAogICJTdGF0ZW1lbnQiOiBbCiAgICB7CiAgICAgICJFZmZlY3QiOiAiQWxsb3ciLAogICAgICAiQWN0aW9uIjogWyJzMzpHZXRPYmplY3QiXSwKICAgICAgIlJlc291cmNlIjogImFybjphd3M6czM6OjpmaW5hbmNlLWJ1Y2tldC8qIgogICAgfQogIF0KfQ==",
+       policyId: "arn:aws:iam::123456789012:policy/S3ReadFinance"
+     }
+   }
+   ```
+
+**Granting policy_document Entitlements**:
+
+When a `policy_document` entitlement is granted to an account, the connector provisions the policy to the target system:
+
+```prisma
+AccountEntitlementGrant {
+  accountId: "acc_user_alice_aws"
+  entitlementId: "ent_aws_s3_read_finance"  // References policy_document entitlement
+  grantType: "DIRECT"                       // NOT POLICY_DERIVED
+  state: "active"
+}
+```
+
+The provisioner (via AWS IAM connector) attaches the IAM policy to the account. Access requests are then evaluated by AWS IAM at runtime, not by the IGA system.
+
+**See Also**: Research Decision #9 (research.md) for ABAC removal rationale and migration notes
 
 **Nesting/Hierarchy** (FR-010):
 ```prisma

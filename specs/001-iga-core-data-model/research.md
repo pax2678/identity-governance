@@ -369,6 +369,111 @@ This document resolves all "NEEDS CLARIFICATION" items identified in [plan.md](p
 
 ---
 
+### 9. Policy Modeling: ABAC Removal from PolicyType Enum
+
+**Decision**: **Remove ABAC from PolicyType enum; model ABAC-style policies as `policy_document` entitlements**
+
+**Rationale**:
+- **Evaluation Location Distinction**: IGA system evaluates BIRTHRIGHT and SOD policies proactively within the IGA engine. ABAC policies are runtime-evaluated by target systems (OPA bundles, AWS IAM policies, Azure RBAC policies), not by IGA.
+- **Entity Modeling Clarity**: The Policy entity represents IGA-managed policies that produce grants via `GrantType.POLICY_DERIVED`. ABAC policies are provisioned as entitlement grants (like any other entitlement) to target systems where those systems perform runtime access control evaluation.
+- **Separation of Concerns**:
+  - **IGA-evaluated policies** (BIRTHRIGHT, SOD): Defined in Policy table, evaluated by IGA engine, produce AccountEntitlementGrant records with `GrantType.POLICY_DERIVED`
+  - **Target-evaluated policies** (ABAC): Provisioned as Entitlement records with `entitlementType = 'policy_document'`, pushed to target systems (OPA, AWS, Azure), evaluated at runtime by those systems
+- **Coverage Matrix Alignment**: `policy_document` entitlementType aligns with `policy_opa` connector family in coverage-matrix.yaml (OPA policy bundle provisioning)
+- **Prevents Semantic Confusion**: Having ABAC in PolicyType created ambiguity about where policy evaluation happens and how policies map to grants
+
+**Context**:
+- **Original State**: PolicyType included `ABAC` alongside `BIRTHRIGHT` and `SOD`
+- **Problem**: ABAC policies (like OPA Rego bundles or AWS IAM policies) are not evaluated by IGA; they're provisioned to target systems as entitlements where the target system evaluates them at runtime for access requests
+- **Solution**: Model ABAC-style policies as entitlements (`Entitlement.entitlementType = 'policy_document'`) that get provisioned like any other entitlement
+
+**Implementation Details**:
+
+1. **ABAC Policy Modeling via policy_document Entitlements**:
+   ```prisma
+   // Target system: OPA-enabled service
+   Entitlement {
+     id: "ent_opa_read_documents"
+     systemId: "sys_document_service"
+     name: "OPA Policy: Read Documents"
+     entitlementType: "policy_document"  // <-- ABAC policy modeled as entitlement type
+     definition: {
+       policy_id: "read_documents",
+       policy_bundle: "base64_encoded_rego_bundle",
+       policy_language: "rego",
+       evaluation_endpoint: "/v1/data/authz/allow"
+     }
+   }
+
+   // Granting this entitlement provisions the OPA policy to the target system
+   AccountEntitlementGrant {
+     accountId: "acc_service_account_123"
+     entitlementId: "ent_opa_read_documents"
+     grantType: "DIRECT"  // Direct grant, not POLICY_DERIVED
+     state: "active"
+   }
+   ```
+
+2. **Evaluation Semantics**:
+   - **BIRTHRIGHT policies** (IGA-evaluated):
+     - Defined in Policy table with `policyType = 'BIRTHRIGHT'`
+     - IGA engine evaluates rules periodically (e.g., "dept=Finance → FinanceBaseRole")
+     - Produces `AccountEntitlementGrant` records with `GrantType.POLICY_DERIVED`
+   - **SOD policies** (IGA-evaluated):
+     - Defined in Policy table with `policyType = 'SOD'`
+     - IGA engine checks for conflicts during grant creation/approval
+     - Blocks incompatible grants (e.g., "cannot have both PurchaseApprover + Vendor entitlements")
+   - **ABAC policies** (target-evaluated):
+     - Modeled as Entitlement with `entitlementType = 'policy_document'`
+     - Provisioned to target system via connector (policy_opa family)
+     - Target system evaluates policy at runtime for each access request (e.g., OPA evaluates "user.dept == 'Finance' AND resource.type == 'invoice'")
+
+3. **Examples of ABAC → policy_document Mapping**:
+
+   | ABAC Policy Example | IGA Data Model |
+   |---------------------|----------------|
+   | **OPA Policy Bundle** (Rego code for document access) | Entitlement with `entitlementType: 'policy_document'`, definition contains base64-encoded Rego bundle |
+   | **AWS IAM Policy** (JSON policy for S3 access) | Entitlement with `entitlementType: 'policy_document'`, definition contains IAM policy JSON |
+   | **Azure ABAC Role Assignment** (condition-based role assignment) | Entitlement with `entitlementType: 'role'`, but account-level attributes could reference policy_document for conditions |
+   | **Kubernetes RBAC with OPA Gatekeeper** | Policy provisioned as ConfigMap via k8s connector; entitlement references ConfigMap |
+
+4. **Decision Criteria: When to Use Policy Entity vs policy_document Entitlement**:
+
+   | Criterion | Use Policy Entity (BIRTHRIGHT/SOD) | Use policy_document Entitlement |
+   |-----------|-----------------------------------|--------------------------------|
+   | **Evaluation Location** | IGA system evaluates proactively | Target system evaluates at runtime |
+   | **Produces Grants?** | Yes (POLICY_DERIVED grants) | No (is itself a grant) |
+   | **Audit Trail** | Policy evaluation events in IGA audit log | Target system logs access decisions (IGA logs provisioning) |
+   | **Modification Frequency** | Changes trigger grant recalculation | Changes provisioned to target system |
+   | **Example Use Cases** | "All Finance users get FinanceBaseRole", "Cannot have PurchaseApprover + Vendor" | OPA Rego bundles, AWS IAM policies, Azure conditions |
+
+**Alternatives Considered**:
+- **Keep ABAC in PolicyType with evaluation_location field**: Rejected because it conflates two different concepts (IGA-evaluated rules vs target-provisioned policies) in a single entity table. Leads to confusion about whether Policy entity produces grants or is itself provisioned as a grant.
+- **Create separate AbacPolicy entity**: Rejected because ABAC policies are semantically entitlements (they're provisioned to accounts on target systems). Creating a parallel entity duplicates grant management logic.
+- **Use Policy entity for all policy types but add is_iga_evaluated flag**: Rejected due to complexity in grant generation logic (conditional behavior based on flag) and unclear audit semantics.
+
+**Trade-offs Accepted**:
+- **Terminology Overload**: The word "policy" is used in two contexts:
+  1. Policy entity (IGA-evaluated rules: BIRTHRIGHT, SOD)
+  2. policy_document entitlementType (target-evaluated ABAC policies)
+  - Mitigated by: Clear documentation, explicit distinction in data-model.md, consistent terminology in UI ("Birthright Rules" vs "Policy Documents")
+- **No Unified Policy View**: Administrators cannot view "all policies" in a single page; BIRTHRIGHT/SOD policies are in Policy table, ABAC policies are in Entitlement table.
+  - Mitigated by: UI can provide unified "Policy Management" page with tabs for "Birthright Rules", "SoD Rules", and "Policy Documents" (filtered Entitlement view)
+
+**Constitution Compliance**:
+- **Separation of Concerns**: Aligns with "Entities should model governance concepts, not implementation details" principle
+- **Clarity**: Removes ambiguity from PolicyType enum definition
+- **Auditability**: Both policy types (IGA-evaluated and target-evaluated) have clear audit trails (Policy evaluation events vs Entitlement provisioning events)
+
+**Migration Notes**:
+- If any ABAC policies existed in earlier prototypes, migration path:
+  1. Export Policy records where `policyType = 'ABAC'`
+  2. Create Entitlement records with `entitlementType = 'policy_document'`, copying policy definition to `Entitlement.definition`
+  3. Create AccountEntitlementGrant records for accounts that had POLICY_DERIVED grants from ABAC policies, converting `grantType` to `DIRECT`
+  4. Delete old ABAC Policy records
+
+---
+
 ## Summary of Decisions
 
 | Research Item | Decision | Rationale (One-Liner) |
@@ -381,6 +486,7 @@ This document resolves all "NEEDS CLARIFICATION" items identified in [plan.md](p
 | Time-Bound Enforcement | **Vercel Cron / node-cron** | Zero-config for Vercel, lightweight for self-hosted |
 | Credential Storage | **Env vars (prototype) → OpenBao (production)** | Pragmatic prototype path with clear production upgrade |
 | UI Components & Styling | **shadcn/ui + Tailwind CSS** | Copy-paste ownership, Next.js 14 native, accessible, performant |
+| Policy Modeling (ABAC) | **Remove ABAC from PolicyType; use policy_document entitlements** | Separates IGA-evaluated policies from target-evaluated policies |
 
 ---
 
