@@ -1,0 +1,14 @@
+// Prisma Schema for IGA Core Data Model
+// PostgreSQL with Apache AGE graph extension per research.md Decision #2
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Schemas will be added in Phase 2 (Foundational) tasks T009-T019
+// This file is initialized with minimal structure for Phase 1
