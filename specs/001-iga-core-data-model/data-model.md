@@ -370,7 +370,7 @@ model AccountEntitlementGrant {
 enum GrantType {
   DIRECT            // Direct grant (account directly assigned entitlement)
   GROUP_IN_GROUP    // Derived via nested group membership
-  POLICY_DERIVED    // Derived via policy evaluation (ABAC)
+  POLICY_DERIVED    // Derived via BIRTHRIGHT policy evaluation
 }
 
 enum GrantState {
@@ -538,7 +538,7 @@ model RoleBundleEntitlement {
 
 ### 9. Policy (Optional)
 
-**Purpose**: Represents birthright rules, SoD constraints, or ABAC conditions.
+**Purpose**: Represents birthright rules and SoD constraints.
 
 **Source**: spec.md:212
 
@@ -558,7 +558,6 @@ model Policy {
 enum PolicyType {
   BIRTHRIGHT  // Auto-grant entitlements based on identity attributes (FR-034)
   SOD         // Segregation of Duties conflict rules (FR-032, FR-033)
-  ABAC        // Attribute-Based Access Control conditions
 }
 ```
 
