@@ -204,18 +204,30 @@ app/                                    # Next.js App Router
 │   ├── page.tsx                      # Dashboard home (access overview)
 │   ├── identities/
 │   │   ├── page.tsx                  # Identity list + search
-│   │   └── [id]/page.tsx             # Identity detail + access graph
+│   │   ├── [id]/page.tsx             # Identity detail + access graph
+│   │   └── components/
+│   │       ├── identity-table.tsx    # shadcn <Table> for identity list
+│   │       └── identity-filters.tsx  # shadcn <Select> + <Input> for filtering
 │   ├── access-requests/
 │   │   ├── page.tsx                  # Pending approvals
-│   │   └── [id]/page.tsx             # Request detail
+│   │   ├── [id]/page.tsx             # Request detail
+│   │   └── components/
+│   │       ├── request-form.tsx      # shadcn <Form> with Zod validation
+│   │       └── approval-dialog.tsx   # shadcn <Dialog> for approve/reject
 │   └── certifications/
 │       ├── page.tsx                  # Active campaigns
-│       └── [id]/page.tsx             # Campaign review UI
+│       ├── [id]/page.tsx             # Campaign review UI
+│       └── components/
+│           ├── review-table.tsx      # Bulk certification UI with shadcn <Checkbox>
+│           └── campaign-progress.tsx # shadcn <Progress> bar
 ├── (portal)/                          # Self-service portal route group
 │   ├── layout.tsx                    # Portal layout
 │   ├── my-access/page.tsx            # User's current access
-│   └── request/page.tsx              # Access request form
-└── layout.tsx                         # Root layout (providers, auth)
+│   ├── request/page.tsx              # Access request form
+│   └── components/
+│       ├── access-card.tsx           # shadcn <Card> for displaying grants
+│       └── request-wizard.tsx        # Multi-step form with shadcn <Tabs>
+└── layout.tsx                         # Root layout (Tailwind globals, theme provider)
 
 lib/                                   # Shared utilities and core logic
 ├── db/
@@ -265,7 +277,35 @@ lib/                                   # Shared utilities and core logic
 │   └── middleware.ts                 # Auth middleware utilities
 └── utils/
     ├── graph-query.ts                # Graph traversal helpers
-    └── validation.ts                 # Zod schemas for API validation
+    ├── validation.ts                 # Zod schemas for API validation
+    └── utils.ts                      # cn() helper for Tailwind class merging
+
+components/                            # shadcn/ui components (copy-paste from CLI)
+├── ui/                                # Primitive UI components
+│   ├── button.tsx                    # Button component (Radix UI based)
+│   ├── card.tsx                      # Card layout component
+│   ├── table.tsx                     # Table component with sorting
+│   ├── form.tsx                      # Form with React Hook Form + Zod
+│   ├── input.tsx                     # Text input component
+│   ├── select.tsx                    # Select dropdown component
+│   ├── dialog.tsx                    # Modal dialog component
+│   ├── alert-dialog.tsx              # Confirmation dialog
+│   ├── badge.tsx                     # Badge for status indicators
+│   ├── tabs.tsx                      # Tab navigation component
+│   ├── progress.tsx                  # Progress bar component
+│   ├── checkbox.tsx                  # Checkbox component
+│   ├── dropdown-menu.tsx             # Dropdown menu (user profile)
+│   ├── command.tsx                   # Command palette/search
+│   ├── popover.tsx                   # Popover component
+│   ├── separator.tsx                 # Visual separator
+│   ├── label.tsx                     # Form label component
+│   ├── textarea.tsx                  # Multi-line text input
+│   ├── calendar.tsx                  # Calendar component
+│   └── date-picker.tsx               # Date picker for time-bound access
+└── theme-provider.tsx                # Dark mode provider (optional Phase 2)
+
+styles/
+└── globals.css                       # Tailwind @layer directives + custom styles
 
 tests/
 ├── unit/                              # Unit tests (Vitest)
@@ -282,14 +322,17 @@ tests/
 
 public/                                # Static assets
 
-prisma/                                # Prisma schema (if Prisma selected)
+prisma/                                # Prisma schema (Prisma selected)
 └── schema.prisma
 
-drizzle/                               # Drizzle schema (if Drizzle selected)
-└── schema.ts
+tailwind.config.ts                     # Tailwind CSS configuration
+postcss.config.js                      # PostCSS configuration (Tailwind)
+components.json                        # shadcn/ui CLI configuration
 ```
 
 **Structure Decision**: Next.js App Router (web application) with Backend-for-Frontend (BFF) pattern. All API logic resides in `/app/api/**` route handlers. Shared business logic in `/lib/services/**` enables reuse across API routes and UI Server Components. Connector framework in `/lib/connectors/**` implements pluggable adapter pattern per coverage-matrix.yaml contracts. Clear separation between admin dashboard (`/(dashboard)`) and self-service portal (`/(portal)`) route groups.
+
+**UI Architecture**: shadcn/ui components live in `/components/ui/` (copy-pasted from CLI, fully owned by project). Feature-specific components in route-level `components/` directories use shadcn primitives. Tailwind CSS utilities in `/styles/globals.css` with configuration in `tailwind.config.ts`. All components support TypeScript strict mode with full type safety.
 
 ## Complexity Tracking
 
@@ -380,6 +423,7 @@ drizzle/                               # Drizzle schema (if Drizzle selected)
 - ✅ Backend: Next.js (TypeScript, Node.js 20+)
 - ✅ Database: PostgreSQL 16 with Apache AGE extension (graph-capable)
 - ✅ API Layer: REST with JSON (OpenAPI specs generated)
+- ✅ UI Framework: shadcn/ui + Tailwind CSS (copy-paste components, utility-first styling)
 - ✅ Connector Framework: TypeScript interface-based (connector-base-contract.yaml)
 - ✅ Authentication: NextAuth.js with SSO support
 - ✅ Audit Logging: PostgreSQL audit schema with append-only constraints (data-model.md)
@@ -392,13 +436,14 @@ drizzle/                               # Drizzle schema (if Drizzle selected)
 5. ✅ Connector Framework: TypeScript interfaces + factory (research.md)
 6. ✅ Time-bound Enforcement: Vercel Cron / node-cron (research.md)
 7. ✅ Credential Storage: Env vars (prototype) → OpenBao (production) (research.md)
+8. ✅ UI Components & Styling: shadcn/ui + Tailwind CSS (research.md)
 
 ---
 
 ## Phase 1 Deliverables: ✅ COMPLETE
 
 **Generated Artifacts**:
-- [x] **research.md**: 7 technology decisions resolved with rationale (Prisma, PostgreSQL+AGE, hybrid policy, same-DB audit, TypeScript interfaces, Vercel Cron, env var credentials)
+- [x] **research.md**: 8 technology decisions resolved with rationale (Prisma, PostgreSQL+AGE, hybrid policy, same-DB audit, TypeScript interfaces, Vercel Cron, env var credentials, shadcn/ui + Tailwind CSS)
 - [x] **data-model.md**: 10 core entities with Prisma schemas, relationships, state machines, validation rules, graph queries (Apache AGE Cypher examples)
 - [x] **contracts/identity-registry-api.yaml**: OpenAPI 3.1 spec (46 endpoints, 30+ schemas)
 - [x] **contracts/governance-api.yaml**: OpenAPI 3.1 spec (governance workflows)

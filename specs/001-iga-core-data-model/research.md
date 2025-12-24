@@ -258,6 +258,117 @@ This document resolves all "NEEDS CLARIFICATION" items identified in [plan.md](p
 
 ---
 
+### 8. UI Component Library & Styling: shadcn/ui + Tailwind CSS
+
+**Decision**: **shadcn/ui (copy-paste components) + Tailwind CSS v3**
+
+**Rationale**:
+- **Next.js App Router Native**: shadcn/ui is built specifically for React Server Components and Next.js 14+ App Router patterns
+- **Component Ownership**: Copy-paste approach gives full control over component code (no npm package lock-in), aligns with project philosophy of customization
+- **Accessibility Built-in**: Built on Radix UI primitives with WCAG 2.1 Level AA compliance (critical for governance software used by compliance teams)
+- **Performance**: Tailwind's JIT compiler with CSS purging ensures minimal bundle size (< 50KB gzipped CSS), supports SC-001 performance requirement
+- **Developer Experience**: Utility-first CSS enables rapid prototyping, TypeScript autocomplete for both Tailwind classes and component props
+- **IGA UI Requirements Fit**: Pre-built table, form, dialog, badge, select, tabs components match complex IGA admin dashboard requirements (identity lists, approval workflows, certification campaigns)
+- **Ecosystem Integration**: Native React Hook Form support (pairs with Zod validation), seamless NextAuth.js integration for user menus
+- **Zero Runtime CSS-in-JS**: Static CSS extraction (unlike Chakra UI or Emotion) = better performance on Vercel Edge
+
+**Implementation Plan**:
+1. **Install Dependencies**:
+   ```bash
+   npx shadcn-ui@latest init
+   # Automatically configures Tailwind CSS, creates components directory, sets up theming system
+   ```
+2. **Core Components for Phase 1 (P1-P3 - Discovery)**:
+   - `table` + `pagination` (identity/account/entitlement lists)
+   - `card` + `separator` (access graph visualization layout)
+   - `badge` (risk scores, status indicators, grant types)
+   - `input` + `command` (search/filter UI with keyboard shortcuts)
+   - `button` + `dropdown-menu` (actions, user profile menu with NextAuth.js)
+3. **Governance Components for Phase 2 (P4-P6 - Workflows)**:
+   - `form` + `textarea` + `label` (access request submission with Zod validation integration)
+   - `dialog` + `alert-dialog` (approval workflows, confirmation modals, SoD violation warnings)
+   - `tabs` + `progress` + `checkbox` (certification campaign review UI, bulk certify/revoke)
+   - `calendar` + `date-picker` (time-bound access request expiry selection)
+   - `select` + `popover` (entitlement catalog filtering by system/type/risk)
+4. **Project Structure**:
+   ```
+   components/
+   ├── ui/                    # shadcn/ui primitives (copied from CLI)
+   │   ├── button.tsx
+   │   ├── table.tsx
+   │   ├── form.tsx
+   │   ├── dialog.tsx
+   │   └── ... (20+ components)
+   └── theme-provider.tsx     # Dark mode support (optional for Phase 2)
+
+   app/
+   ├── (dashboard)/           # Admin UI
+   │   ├── identities/
+   │   │   └── components/
+   │   │       ├── identity-table.tsx    # Uses shadcn <Table>
+   │   │       └── identity-filters.tsx  # Uses shadcn <Select> + <Input>
+   │   └── access-requests/
+   │       └── components/
+   │           ├── request-form.tsx      # Uses shadcn <Form> + Zod
+   │           └── approval-dialog.tsx   # Uses shadcn <Dialog>
+   └── (portal)/              # Self-service UI
+       └── components/
+           └── request-wizard.tsx        # Multi-step form with shadcn <Tabs>
+
+   lib/
+   └── utils.ts               # cn() utility for Tailwind class merging
+
+   styles/
+   └── globals.css            # Tailwind @layer directives + custom styles
+
+   tailwind.config.ts         # Tailwind configuration (colors, fonts, spacing)
+   components.json            # shadcn/ui CLI configuration
+   ```
+
+**Alternatives Considered**:
+- **Material UI (MUI)**: Industry-standard React component library with comprehensive components. Rejected due to:
+  - Heavy bundle size (300KB+ even with tree-shaking)
+  - Harder customization (theme override complexity)
+  - Slower DX with Next.js 14 App Router (not optimized for Server Components)
+  - Runtime CSS-in-JS overhead (sx prop computes styles at runtime)
+- **Ant Design**: Enterprise-focused component library popular in admin dashboards. Rejected because:
+  - Opinionated design system (hard to customize for custom branding)
+  - Larger bundle than shadcn/ui (~250KB minified)
+  - Chinese-first documentation (though English available)
+- **Chakra UI**: Developer-friendly component library with good accessibility. Rejected due to:
+  - Runtime CSS-in-JS performance overhead (computes styles during render)
+  - Incomplete Next.js 14 App Router support (Server Components integration issues)
+  - Larger bundle size compared to shadcn/ui
+- **Headless UI (Tailwind Labs)**: Unstyled accessible components. Rejected because:
+  - Requires manual styling for every component (slows prototype iteration)
+  - No pre-built complex components (tables, forms, date pickers) = more development time
+  - shadcn/ui provides same accessibility with pre-styled components
+- **Pure Tailwind CSS (no component library)**: Build all components from scratch. Rejected because:
+  - Reinventing the wheel for complex UI (tables with sorting, modals with focus traps, forms with validation)
+  - Slower time-to-market for Phase 1-6 UIs
+  - Higher maintenance burden (accessibility bugs, browser compatibility)
+
+**Trade-offs Accepted**:
+- Component code lives in repository (increases codebase LOC) vs external npm package; acceptable because ownership enables IGA-specific UX customization (e.g., custom risk score badge colors, approval workflow stepper)
+- Tailwind utility classes make JSX verbose (`className="flex items-center justify-between ..."`); mitigated by:
+  - Extracting reusable components for repeated patterns
+  - Using `@apply` directive in CSS for complex utility combinations
+  - TypeScript autocomplete reduces class name typos
+- Learning curve for Tailwind's utility-first approach (developers accustomed to semantic CSS); acceptable because:
+  - Tailwind is industry standard (large community, extensive documentation)
+  - Faster iteration once learned (no context switching between HTML and CSS files)
+
+**Accessibility Compliance**:
+- All shadcn/ui components meet WCAG 2.1 Level AA standards:
+  - Keyboard navigation (Tab, Enter, Escape, Arrow keys)
+  - Screen reader support (ARIA labels, roles, live regions)
+  - Focus management (focus trap in modals, focus restoration)
+  - Color contrast compliance (default Slate theme meets 4.5:1 ratio)
+- Critical for IGA admin workflows where compliance and auditability are required by governance teams
+- Supports high-contrast mode for accessibility settings (CSS media queries)
+
+---
+
 ## Summary of Decisions
 
 | Research Item | Decision | Rationale (One-Liner) |
@@ -269,6 +380,7 @@ This document resolves all "NEEDS CLARIFICATION" items identified in [plan.md](p
 | Connector Framework | **TypeScript interfaces + factory** | Compile-time type safety, no runtime plugin complexity |
 | Time-Bound Enforcement | **Vercel Cron / node-cron** | Zero-config for Vercel, lightweight for self-hosted |
 | Credential Storage | **Env vars (prototype) → OpenBao (production)** | Pragmatic prototype path with clear production upgrade |
+| UI Components & Styling | **shadcn/ui + Tailwind CSS** | Copy-paste ownership, Next.js 14 native, accessible, performant |
 
 ---
 
@@ -277,10 +389,11 @@ This document resolves all "NEEDS CLARIFICATION" items identified in [plan.md](p
 **Updated Technical Context** (resolves all NEEDS CLARIFICATION):
 
 **Language/Version**: TypeScript 5.x with Next.js 14+ (App Router)
-**Primary Dependencies**: Next.js, NextAuth.js, **Prisma ORM**, **PostgreSQL 16 with Apache AGE**
+**Primary Dependencies**: Next.js, NextAuth.js, **Prisma ORM**, **PostgreSQL 16 with Apache AGE**, **shadcn/ui + Tailwind CSS**
 **Storage**: PostgreSQL with `public` schema (entities) + `audit` schema (events), time-series partitioning
 **Testing**: Vitest (unit/integration), Playwright (E2E), contract tests for connectors
 **Target Platform**: Node.js 20+, Vercel (primary) or self-hosted Docker
+**UI Framework**: shadcn/ui components + Tailwind CSS v3 (utility-first styling)
 **Policy Engine**: Embedded TypeScript evaluator (Phase 1) + OPA HTTP (Phase 2+)
 **Event Bus**: In-process event emitter with PostgreSQL audit log persistence
 **Connector Framework**: TypeScript interface-based with factory pattern
