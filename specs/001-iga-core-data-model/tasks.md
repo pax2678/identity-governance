@@ -39,26 +39,26 @@ Next.js App Router project structure:
 
 ---
 
-## Phase 2: Foundational (Blocking Prerequisites)
+## Phase 2: Foundational (Blocking Prerequisites) ⏳ IN PROGRESS
 
 **Purpose**: Core infrastructure that MUST be complete before ANY user story can be implemented
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T009 Define Prisma schema for Identity entity in prisma/schema.prisma per data-model.md lines 73-106
-- [ ] T010 [P] Define Prisma schema for System entity in prisma/schema.prisma per data-model.md lines 108-137
-- [ ] T011 [P] Define Prisma schema for Account entity in prisma/schema.prisma per data-model.md lines 139-186
-- [ ] T012 [P] Define Prisma schema for Entitlement entity in prisma/schema.prisma per data-model.md lines 216-250
-- [ ] T013 [P] Define Prisma schema for IdentityAccountLink entity in prisma/schema.prisma per data-model.md lines 279-315
-- [ ] T014 [P] Define Prisma schema for AccountEntitlementGrant entity in prisma/schema.prisma per data-model.md lines 317-386
-- [ ] T015 [P] Define Prisma schema for EntitlementHierarchy join table in prisma/schema.prisma per data-model.md lines 264-274
-- [ ] T016 [P] Define Prisma schema for AccessAssignment entity in prisma/schema.prisma per data-model.md lines 488-564
-- [ ] T017 [P] Define Prisma schema for RoleBundle entity (optional) in prisma/schema.prisma per data-model.md lines 594-625
-- [ ] T018 [P] Define Prisma schema for Policy entity (optional) in prisma/schema.prisma per data-model.md lines 631-653
-- [ ] T019 [P] Define Prisma schema for CertificationCampaign entity (optional) in prisma/schema.prisma per data-model.md lines 687-728
-- [ ] T020 Run Prisma migration to create database tables: `npx prisma migrate dev --name init`
-- [ ] T021 Generate Prisma Client types: `npx prisma generate`
-- [ ] T022 Create database client singleton in lib/db/client.ts with connection pooling
+- [x] T009 Define Prisma schema for Identity entity in prisma/schema.prisma per data-model.md lines 73-106
+- [x] T010 [P] Define Prisma schema for System entity in prisma/schema.prisma per data-model.md lines 108-137
+- [x] T011 [P] Define Prisma schema for Account entity in prisma/schema.prisma per data-model.md lines 139-186
+- [x] T012 [P] Define Prisma schema for Entitlement entity in prisma/schema.prisma per data-model.md lines 216-250
+- [x] T013 [P] Define Prisma schema for IdentityAccountLink entity in prisma/schema.prisma per data-model.md lines 279-315
+- [x] T014 [P] Define Prisma schema for AccountEntitlementGrant entity in prisma/schema.prisma per data-model.md lines 317-386
+- [x] T015 [P] Define Prisma schema for EntitlementHierarchy join table in prisma/schema.prisma per data-model.md lines 264-274
+- [x] T016 [P] Define Prisma schema for AccessAssignment entity in prisma/schema.prisma per data-model.md lines 488-564
+- [x] T017 [P] Define Prisma schema for RoleBundle entity (optional) in prisma/schema.prisma per data-model.md lines 594-625
+- [x] T018 [P] Define Prisma schema for Policy entity (optional) in prisma/schema.prisma per data-model.md lines 631-653
+- [x] T019 [P] Define Prisma schema for CertificationCampaign entity (optional) in prisma/schema.prisma per data-model.md lines 687-728
+- [x] T020 Run Prisma migration to create database tables: `npx prisma migrate dev --name init`
+- [x] T021 Generate Prisma Client types: `npx prisma generate`
+- [x] T022 Create database client singleton in lib/db/client.ts with connection pooling
 - [ ] T023 [P] Create TypeScript domain models for Identity in lib/models/identity.ts with Zod validation
 - [ ] T024 [P] Create TypeScript domain models for Account in lib/models/account.ts with Zod validation
 - [ ] T025 [P] Create TypeScript domain models for Entitlement in lib/models/entitlement.ts with Zod validation
