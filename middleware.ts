@@ -1,13 +1,7 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
+// T029: Next.js Middleware with NextAuth.js v5 Integration
+// Protects routes using NextAuth.js authorization callback
 
-// This is a placeholder middleware for authentication
-// Will be fully implemented in Phase 2 (T029) with NextAuth.js configuration
-export function middleware(request: NextRequest) {
-  // For now, allow all requests
-  // Authentication logic will be added in Phase 2: Foundational
-  return NextResponse.next()
-}
+export { auth as middleware } from '@/lib/auth'
 
 // Configure which routes to protect
 export const config = {

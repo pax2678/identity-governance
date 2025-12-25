@@ -6,7 +6,8 @@
       "Bash(pwsh:*)",
       "Bash(powershell.exe:*)",
       "Bash(git add:*)",
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }
