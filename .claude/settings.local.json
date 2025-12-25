@@ -5,7 +5,8 @@
       "Bash(ls:*)",
       "Bash(pwsh:*)",
       "Bash(powershell.exe:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(docker exec:*)"
     ]
   }
 }

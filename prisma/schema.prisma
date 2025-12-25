@@ -10,5 +10,389 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Schemas will be added in Phase 2 (Foundational) tasks T009-T019
-// This file is initialized with minimal structure for Phase 1
+// ============================================================================
+// CORE ENTITIES (Tasks T009-T019)
+// ============================================================================
+
+// T009: Identity Entity
+model Identity {
+  id                String   @id @default(uuid()) @db.Uuid
+  identityType      IdentityType
+  displayName       String
+  status            IdentityStatus
+  identitySource    String            // e.g., "HRIS", "CMDB", "Manual"
+  attributes        Json              // Flexible attributes (dept, title, email, etc.)
+  ownerIdentityId   String?   @db.Uuid // For non-human identities (FR-002)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  owner             Identity? @relation("IdentityOwnership", fields: [ownerIdentityId], references: [id])
+  ownedIdentities   Identity[] @relation("IdentityOwnership")
+  accountLinks      IdentityAccountLink[]
+  requestedAccess   AccessAssignment[] @relation("Requestor")
+  ownedEntitlements Entitlement[]
+  auditEvents       Event[] @relation("Actor")
+
+  @@index([status, identityType])
+  @@index([identitySource])
+  @@map("identities")
+}
+
+enum IdentityType {
+  HUMAN
+  SERVICE
+  AGENT
+  DEVICE
+  EXTERNAL
+}
+
+enum IdentityStatus {
+  ACTIVE
+  STAGED    // New identity not yet activated
+  DISABLED  // Temporary suspension
+  DELETED   // Soft delete, retained for audit
+}
+
+// T010: System Entity
+model System {
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String   @unique
+  systemType        String            // e.g., "AD", "LDAP", "SaaS", "AWS", "K8s", "DB"
+  connectorFamily   String            // From coverage-matrix.yaml: "ldap", "scim", "k8s_api", etc.
+  connectionConfig  Json              // Connector-specific config (host, port, base_dn, etc.)
+  isAuthoritative   Boolean  @default(false) // True if system is HRIS/CMDB
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  accounts          Account[]
+  entitlements      Entitlement[]
+
+  @@index([systemType])
+  @@index([connectorFamily])
+  @@map("systems")
+}
+
+// T011: Account Entity
+model Account {
+  id                String   @id @default(uuid()) @db.Uuid
+  systemId          String   @db.Uuid
+  accountType       String            // From coverage-matrix.yaml: "ldap_user", "idp_user", etc.
+  nativeId          String            // Immutable ID from target system (e.g., DN, UUID)
+  status            AccountStatus
+  lastSeenAt        DateTime          // Last discovery timestamp (FR-007)
+  metadata          Json              // System-specific attributes
+  credentialRef     String?           // Optional reference to stored credentials
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  system            System @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  identityLinks     IdentityAccountLink[]
+  grants            AccountEntitlementGrant[]
+
+  @@unique([systemId, nativeId])  // Unique constraint: one account per native ID per system
+  @@index([systemId, accountType])
+  @@index([status])
+  @@map("accounts")
+}
+
+enum AccountStatus {
+  CREATED   // Account exists but not yet active
+  ACTIVE    // Account is active in target system
+  DISABLED  // Account disabled (suspended)
+  DELETED   // Account deleted in target system
+}
+
+// T012: Entitlement Entity
+model Entitlement {
+  id                String   @id @default(uuid()) @db.Uuid
+  systemId          String   @db.Uuid
+  entitlementType   String            // From coverage-matrix.yaml: "group", "role", "policy_document", etc.
+  nativeId          String            // Native ID from target system
+  displayName       String
+  riskScore         Int      @default(0) // 0-100, calculated via FR-011
+  isPrivileged      Boolean  @default(false)
+  ownerIdentityId   String?  @db.Uuid   // Owner for approval routing (FR-009)
+  shape             Json              // Entitlement-specific attributes (path, permissions, etc.)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  system            System @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  owner             Identity? @relation(fields: [ownerIdentityId], references: [id])
+  grants            AccountEntitlementGrant[]
+  parentEntitlements   EntitlementHierarchy[] @relation("ParentEntitlement")
+  childEntitlements    EntitlementHierarchy[] @relation("ChildEntitlement")
+  roleBundleEntitlements RoleBundleEntitlement[]
+
+  @@unique([systemId, nativeId])
+  @@index([systemId, entitlementType])
+  @@index([isPrivileged])
+  @@index([riskScore])
+  @@map("entitlements")
+}
+
+// T013: IdentityAccountLink Entity
+model IdentityAccountLink {
+  id                String   @id @default(uuid()) @db.Uuid
+  identityId        String   @db.Uuid
+  accountId         String   @db.Uuid
+  relationType      AccountRelationType
+  startTime         DateTime @default(now())
+  endTime           DateTime?         // Null = no expiry
+  source            LinkSource        // How link was established
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  identity          Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  account           Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([identityId, accountId]) // One link per identity-account pair
+  @@index([identityId])
+  @@index([accountId])
+  @@index([relationType])
+  @@map("identity_account_links")
+}
+
+enum AccountRelationType {
+  PRIMARY      // Main account for identity
+  ADMIN        // Administrative/elevated account
+  SHARED       // Shared account (e.g., service account used by multiple identities)
+  DELEGATED    // Delegated access (temporary)
+  BREAKGLASS   // Emergency access account
+}
+
+enum LinkSource {
+  BIRTHRIGHT   // Auto-assigned via birthright policy
+  REQUEST      // Created via access request workflow
+  IMPORTED     // Discovered from target system
+  EXCEPTION    // Manual exception grant
+}
+
+// T014: AccountEntitlementGrant Entity
+model AccountEntitlementGrant {
+  id                String   @id @default(uuid()) @db.Uuid
+  accountId         String   @db.Uuid
+  entitlementId     String   @db.Uuid
+  grantType         GrantType
+  startTime         DateTime @default(now())
+  endTime           DateTime?         // Null = no expiry (FR-013)
+  state             GrantState
+  provisioningTaskId String?          // Reference to async provisioning task
+  accessAssignmentId String?  @db.Uuid  // Optional link to access assignment that created this grant
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  account           Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  entitlement       Entitlement @relation(fields: [entitlementId], references: [id], onDelete: Restrict) // Prevent entitlement deletion if grants exist
+  accessAssignment  AccessAssignment? @relation("AccessAssignmentGrant", fields: [accessAssignmentId], references: [id])
+
+  @@unique([accountId, entitlementId]) // One grant per account-entitlement pair
+  @@index([accountId])
+  @@index([entitlementId])
+  @@index([state])
+  @@index([endTime]) // For expiry enforcement queries
+  @@map("account_entitlement_grants")
+}
+
+enum GrantType {
+  DIRECT            // Direct grant (account directly assigned entitlement)
+  GROUP_IN_GROUP    // Derived via nested group membership
+  POLICY_DERIVED    // Derived via BIRTHRIGHT policy evaluation
+}
+
+enum GrantState {
+  PENDING           // Awaiting provisioning (FR-020)
+  ACTIVE            // Successfully provisioned (FR-021)
+  FAILED            // Provisioning failed (FR-022)
+  EXPIRED           // Time-bound grant expired (FR-024)
+  REVOKED           // Manually revoked (FR-024)
+}
+
+// T015: EntitlementHierarchy Join Table
+model EntitlementHierarchy {
+  parentId  String @db.Uuid
+  childId   String @db.Uuid
+
+  parent    Entitlement @relation("ParentEntitlement", fields: [parentId], references: [id], onDelete: Cascade)
+  child     Entitlement @relation("ChildEntitlement", fields: [childId], references: [id], onDelete: Cascade)
+
+  @@id([parentId, childId])
+  @@map("entitlement_hierarchies")
+}
+
+// T016: AccessAssignment Entity
+model AccessAssignment {
+  id                String   @id @default(uuid()) @db.Uuid
+  subjectId         String   @db.Uuid   // Identity or Account ID
+  subjectType       SubjectType
+  targetId          String   @db.Uuid   // Entitlement or Account ID
+  targetType        TargetType
+  action            AssignmentAction
+  requestorId       String   @db.Uuid
+  approvalState     ApprovalState
+  approvers         Json              // Array of { identityId, decision, timestamp }
+  justification     String
+  ticketRef         String?           // Optional ITSM ticket reference
+  slaDeadline       DateTime?         // Approval SLA deadline (SC-005)
+  isTimeBound       Boolean  @default(false)
+  endTime           DateTime?         // Expiry for time-bound access (FR-019)
+  evidence          Json     @default("[]") // Array of evidence objects
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  requestor         Identity @relation("Requestor", fields: [requestorId], references: [id])
+  grants            AccountEntitlementGrant[] @relation("AccessAssignmentGrant")
+
+  @@index([approvalState])
+  @@index([requestorId])
+  @@index([slaDeadline])
+  @@map("access_assignments")
+}
+
+enum SubjectType {
+  IDENTITY
+  ACCOUNT
+}
+
+enum TargetType {
+  ENTITLEMENT
+  ACCOUNT
+}
+
+enum AssignmentAction {
+  BIND    // Link identity to account
+  GRANT   // Grant entitlement to account
+  REVOKE  // Revoke entitlement from account
+}
+
+enum ApprovalState {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  PROVISIONED  // Approved and provisioning completed
+  FAILED       // Provisioning failed after approval
+}
+
+// T017: RoleBundle Entity (Optional)
+model RoleBundle {
+  id                String   @id @default(uuid()) @db.Uuid
+  roleName          String   @unique
+  description       String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  entitlements      RoleBundleEntitlement[]
+
+  @@map("role_bundles")
+}
+
+model RoleBundleEntitlement {
+  roleBundleId      String @db.Uuid
+  entitlementId     String @db.Uuid
+
+  roleBundle        RoleBundle @relation(fields: [roleBundleId], references: [id], onDelete: Cascade)
+  entitlement       Entitlement @relation(fields: [entitlementId], references: [id], onDelete: Cascade)
+
+  @@id([roleBundleId, entitlementId])
+  @@map("role_bundle_entitlements")
+}
+
+// T018: Policy Entity (Optional)
+model Policy {
+  id                String   @id @default(uuid()) @db.Uuid
+  policyType        PolicyType
+  policyDefinition  Json              // Type-specific policy logic
+  isEnabled         Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("policies")
+}
+
+enum PolicyType {
+  BIRTHRIGHT  // Auto-grant entitlements based on identity attributes (FR-034)
+  SOD         // Segregation of Duties conflict rules (FR-032, FR-033)
+}
+
+// T019: CertificationCampaign Entity (Optional)
+model CertificationCampaign {
+  id                String   @id @default(uuid()) @db.Uuid
+  campaignName      String
+  scope             Json              // { entitlementIds: [], systemIds: [] }
+  reviewers         Json              // Array of identityIds
+  dueDate           DateTime
+  status            CampaignStatus
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  reviews           CertificationReview[]
+
+  @@map("certification_campaigns")
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model CertificationReview {
+  id                String   @id @default(uuid()) @db.Uuid
+  campaignId        String   @db.Uuid
+  grantId           String   @db.Uuid
+  reviewerId        String   @db.Uuid
+  decision          ReviewDecision?
+  reviewedAt        DateTime?
+
+  campaign          CertificationCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([reviewerId])
+  @@map("certification_reviews")
+}
+
+enum ReviewDecision {
+  CERTIFY   // Approve continued access
+  REVOKE    // Revoke access
+}
+
+// ============================================================================
+// AUDIT SCHEMA
+// ============================================================================
+
+model Event {
+  id                String   @id @default(uuid()) @db.Uuid
+  eventType         String            // e.g., "IdentityCreated", "GrantProvisioned", "AccessApproved"
+  timestamp         DateTime @default(now())
+  actorIdentityId   String?  @db.Uuid   // Who performed the action
+  resourceType      String            // "Identity", "Account", "Grant", etc.
+  resourceId        String   @db.Uuid
+  action            String            // "CREATE", "UPDATE", "DELETE", "APPROVE", "PROVISION"
+  outcome           EventOutcome
+  metadata          Json              // Event-specific details
+  evidenceHash      String?           // Cryptographic hash of linked evidence (SC-013)
+
+  // Relations
+  actor             Identity? @relation("Actor", fields: [actorIdentityId], references: [id])
+
+  @@index([eventType])
+  @@index([actorIdentityId])
+  @@index([resourceType, resourceId])
+  @@index([timestamp]) // For time-range queries (FR-031)
+  @@map("audit_events")
+}
+
+enum EventOutcome {
+  SUCCESS
+  FAILURE
+  PENDING
+}
