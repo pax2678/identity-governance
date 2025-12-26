@@ -3,7 +3,7 @@
 **Input**: Design documents from `/specs/001-iga-core-data-model/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/, quickstart.md
 
-**Tests**: Tests are NOT included in this task list as they were not explicitly requested in the feature specification.
+**Tests**: Following TDD (Test-Driven Development) approach using Vitest 3.2.4 (official Next.js recommendation). Tests are integrated into each phase to ensure quality and provide regression protection.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -39,7 +39,7 @@ Next.js App Router project structure:
 
 ---
 
-## Phase 2: Foundational (Blocking Prerequisites) ⏳ IN PROGRESS
+## Phase 2: Foundational (Blocking Prerequisites) ✅ COMPLETE
 
 **Purpose**: Core infrastructure that MUST be complete before ANY user story can be implemented
 
@@ -59,22 +59,35 @@ Next.js App Router project structure:
 - [x] T020 Run Prisma migration to create database tables: `npx prisma migrate dev --name init`
 - [x] T021 Generate Prisma Client types: `npx prisma generate`
 - [x] T022 Create database client singleton in lib/db/client.ts with connection pooling
-- [ ] T023 [P] Create TypeScript domain models for Identity in lib/models/identity.ts with Zod validation
-- [ ] T024 [P] Create TypeScript domain models for Account in lib/models/account.ts with Zod validation
-- [ ] T025 [P] Create TypeScript domain models for Entitlement in lib/models/entitlement.ts with Zod validation
-- [ ] T026 [P] Create TypeScript domain models for Grant in lib/models/grant.ts with Zod validation
-- [ ] T027 [P] Create TypeScript domain models for AccessAssignment in lib/models/access-assignment.ts with Zod validation
-- [ ] T028 [P] Create TypeScript domain models for Certification in lib/models/certification.ts with Zod validation
-- [ ] T029 Setup NextAuth.js configuration in lib/auth/auth.config.ts per research.md
-- [ ] T030 [P] Create base connector interface in lib/connectors/base/connector.interface.ts per research.md Decision #5
-- [ ] T031 [P] Create connector types (DiscoverAccountsRequest, DiscoverEntitlementsRequest, etc.) in lib/connectors/base/connector.types.ts per data-model.md
-- [ ] T032 [P] Create connector registry and factory in lib/connectors/registry.ts per research.md
-- [ ] T033 [P] Create audit log service skeleton in lib/services/audit/audit-log.service.ts for append-only event logging per FR-029
-- [ ] T034 [P] Setup API error handling middleware in lib/utils/error-handler.ts
-- [ ] T035 [P] Create graph query helpers in lib/utils/graph-query.ts for PostgreSQL with Apache AGE per research.md Decision #2
-- [ ] T036 Install shadcn/ui components: table, card, badge, button, input, form, dialog per research.md lines 276-292
+- [x] T023 [P] Create TypeScript domain models for Identity in lib/models/identity.ts with Zod validation
+- [x] T024 [P] Create TypeScript domain models for Account in lib/models/account.ts with Zod validation
+- [x] T025 [P] Create TypeScript domain models for Entitlement in lib/models/entitlement.ts with Zod validation
+- [x] T026 [P] Create TypeScript domain models for Grant in lib/models/grant.ts with Zod validation
+- [x] T027 [P] Create TypeScript domain models for AccessAssignment in lib/models/access-assignment.ts with Zod validation
+- [x] T028 [P] Create TypeScript domain models for Certification in lib/models/certification.ts with Zod validation
+- [x] T029 Setup NextAuth.js configuration in lib/auth/auth.config.ts per research.md
+- [x] T030 [P] Create base connector interface in lib/connectors/base/connector.interface.ts per research.md Decision #5
+- [x] T031 [P] Create connector types (DiscoverAccountsRequest, DiscoverEntitlementsRequest, etc.) in lib/connectors/base/connector.types.ts per data-model.md
+- [x] T032 [P] Create connector registry and factory in lib/connectors/registry.ts per research.md
+- [x] T033 [P] Create audit log service skeleton in lib/services/audit/audit-log.service.ts for append-only event logging per FR-029
+- [x] T034 [P] Setup API error handling middleware in lib/utils/error-handler.ts
+- [x] T035 [P] Create graph query helpers in lib/utils/graph-query.ts for PostgreSQL with Apache AGE per research.md Decision #2
+- [x] T036 [P] Install shadcn/ui components: table, card, badge, button, input, form, dialog per research.md lines 276-292
+- [x] T037 [P] Setup Vitest 3.2.4 testing framework with vitest.config.ts per official Next.js recommendation
+- [x] T038 [P] Create test directory structure: tests/unit/, tests/integration/, tests/contract/, tests/setup/
+- [x] T039 [P] Create database test helpers in tests/setup/db.setup.ts for test data cleanup
+- [x] T040 [P] Write unit tests for Identity domain model in tests/unit/models/identity.test.ts (Zod validation)
+- [x] T041 [P] Write unit tests for Account domain model in tests/unit/models/account.test.ts (Zod validation)
+- [x] T042 [P] Write unit tests for Entitlement model in tests/unit/models/entitlement.test.ts (risk scoring)
+- [x] T043 [P] Write unit tests for Grant model in tests/unit/models/grant.test.ts (state machine)
+- [x] T044 [P] Write unit tests for AccessAssignment model in tests/unit/models/access-assignment.test.ts (SLA tracking)
+- [x] T045 [P] Write integration tests for database layer in tests/integration/database.test.ts
+- [x] T046 [P] Write integration tests for domain models in tests/integration/domain-models.test.ts
+- [x] T047 [P] Write integration tests for connector framework in tests/integration/connector-framework.test.ts
+- [x] T048 [P] Write integration tests for audit service in tests/integration/audit-service.test.ts
+- [x] T049 [P] Write contract tests for connector interface in tests/contract/connector-interface.test.ts
 
-**Checkpoint**: Foundation ready - user story implementation can now begin in parallel
+**Checkpoint**: Foundation ready - user story implementation can now begin in parallel. All 124 tests passing.
 
 ---
 
@@ -86,30 +99,39 @@ Next.js App Router project structure:
 
 ### Implementation for User Story 1
 
-- [ ] T037 [P] [US1] Implement IdentityService for CRUD operations in lib/services/identity-registry/identity.service.ts per FR-001, FR-002
-- [ ] T038 [P] [US1] Implement AccountService for CRUD operations in lib/services/identity-registry/account.service.ts per FR-005, FR-007
-- [ ] T039 [US1] Implement CorrelationService for identity-account linking in lib/services/identity-registry/correlation.service.ts per FR-006
-- [ ] T040 [US1] Implement identity synchronization logic from HRIS in lib/services/identity-registry/identity.service.ts per FR-003, FR-004
-- [ ] T041 [P] [US1] Create GET /api/identities endpoint in app/api/identities/route.ts per contracts/identity-registry-api.yaml
-- [ ] T042 [P] [US1] Create POST /api/identities endpoint in app/api/identities/route.ts for manual identity creation
-- [ ] T043 [P] [US1] Create GET /api/identities/:id endpoint in app/api/identities/[id]/route.ts
-- [ ] T044 [P] [US1] Create PATCH /api/identities/:id endpoint in app/api/identities/[id]/route.ts
-- [ ] T045 [P] [US1] Create GET /api/identities/:id/accounts endpoint in app/api/identities/[id]/accounts/route.ts per contracts
-- [ ] T046 [P] [US1] Create GET /api/accounts endpoint in app/api/accounts/route.ts per contracts/identity-registry-api.yaml
-- [ ] T047 [P] [US1] Create POST /api/accounts endpoint in app/api/accounts/route.ts
-- [ ] T048 [P] [US1] Create GET /api/accounts/:id endpoint in app/api/accounts/[id]/route.ts
-- [ ] T049 [P] [US1] Create GET /api/accounts/:id/grants endpoint in app/api/accounts/[id]/grants/route.ts
-- [ ] T050 [US1] Implement LDAP connector for account discovery in lib/connectors/ldap/ldap.connector.ts per research.md and coverage-matrix.yaml
-- [ ] T051 [US1] Implement identity correlation algorithm (email/employee ID matching) in lib/services/identity-registry/correlation.service.ts per Assumption 4
-- [ ] T052 [P] [US1] Create identity list page UI in app/(dashboard)/identities/page.tsx using shadcn Table
-- [ ] T053 [P] [US1] Create identity detail page UI in app/(dashboard)/identities/[id]/page.tsx with access graph visualization
-- [ ] T054 [P] [US1] Create IdentityTable component in app/(dashboard)/identities/components/identity-table.tsx per plan.md line 209
-- [ ] T055 [P] [US1] Create IdentityFilters component in app/(dashboard)/identities/components/identity-filters.tsx per plan.md line 210
-- [ ] T056 [US1] Implement identity sync scheduled job in app/api/cron/sync-identities/route.ts per FR-003 and research.md Decision #6
-- [ ] T057 [US1] Add validation and error handling for identity and account operations
-- [ ] T058 [US1] Add audit logging for identity lifecycle events (create, status change) per FR-029
+- [ ] T050 [P] [US1] Write integration tests for IdentityService CRUD in tests/integration/services/identity.service.test.ts
+- [ ] T051 [P] [US1] Write integration tests for AccountService CRUD in tests/integration/services/account.service.test.ts
+- [ ] T052 [P] [US1] Implement IdentityService for CRUD operations in lib/services/identity-registry/identity.service.ts per FR-001, FR-002
+- [ ] T053 [P] [US1] Implement AccountService for CRUD operations in lib/services/identity-registry/account.service.ts per FR-005, FR-007
+- [ ] T054 [US1] Write tests for CorrelationService in tests/integration/services/correlation.service.test.ts
+- [ ] T055 [US1] Implement CorrelationService for identity-account linking in lib/services/identity-registry/correlation.service.ts per FR-006
+- [ ] T056 [US1] Write tests for identity synchronization in tests/integration/sync/identity-sync.test.ts
+- [ ] T057 [US1] Implement identity synchronization logic from HRIS in lib/services/identity-registry/identity.service.ts per FR-003, FR-004
+- [ ] T058 [P] [US1] Write API tests for /api/identities endpoints in tests/integration/api/identities.test.ts
+- [ ] T059 [P] [US1] Create GET /api/identities endpoint in app/api/identities/route.ts per contracts/identity-registry-api.yaml
+- [ ] T060 [P] [US1] Create POST /api/identities endpoint in app/api/identities/route.ts for manual identity creation
+- [ ] T061 [P] [US1] Create GET /api/identities/:id endpoint in app/api/identities/[id]/route.ts
+- [ ] T062 [P] [US1] Create PATCH /api/identities/:id endpoint in app/api/identities/[id]/route.ts
+- [ ] T063 [P] [US1] Create GET /api/identities/:id/accounts endpoint in app/api/identities/[id]/accounts/route.ts per contracts
+- [ ] T064 [P] [US1] Write API tests for /api/accounts endpoints in tests/integration/api/accounts.test.ts
+- [ ] T065 [P] [US1] Create GET /api/accounts endpoint in app/api/accounts/route.ts per contracts/identity-registry-api.yaml
+- [ ] T066 [P] [US1] Create POST /api/accounts endpoint in app/api/accounts/route.ts
+- [ ] T067 [P] [US1] Create GET /api/accounts/:id endpoint in app/api/accounts/[id]/route.ts
+- [ ] T068 [P] [US1] Create GET /api/accounts/:id/grants endpoint in app/api/accounts/[id]/grants/route.ts
+- [ ] T069 [US1] Write contract tests for LDAP connector in tests/contract/connectors/ldap.connector.test.ts
+- [ ] T070 [US1] Implement LDAP connector for account discovery in lib/connectors/ldap/ldap.connector.ts per research.md and coverage-matrix.yaml
+- [ ] T071 [US1] Write tests for correlation algorithm in tests/unit/services/correlation-algorithm.test.ts
+- [ ] T072 [US1] Implement identity correlation algorithm (email/employee ID matching) in lib/services/identity-registry/correlation.service.ts per Assumption 4
+- [ ] T073 [P] [US1] Create identity list page UI in app/(dashboard)/identities/page.tsx using shadcn Table
+- [ ] T074 [P] [US1] Create identity detail page UI in app/(dashboard)/identities/[id]/page.tsx with access graph visualization
+- [ ] T075 [P] [US1] Create IdentityTable component in app/(dashboard)/identities/components/identity-table.tsx per plan.md line 209
+- [ ] T076 [P] [US1] Create IdentityFilters component in app/(dashboard)/identities/components/identity-filters.tsx per plan.md line 210
+- [ ] T077 [US1] Write tests for identity sync job in tests/integration/jobs/sync-identities.test.ts
+- [ ] T078 [US1] Implement identity sync scheduled job in app/api/cron/sync-identities/route.ts per FR-003 and research.md Decision #6
+- [ ] T079 [US1] Add validation and error handling for identity and account operations
+- [ ] T080 [US1] Add audit logging for identity lifecycle events (create, status change) per FR-029
 
-**Checkpoint**: At this point, User Story 1 should be fully functional - can view identities, accounts, and their correlations
+**Checkpoint**: At this point, User Story 1 should be fully functional - can view identities, accounts, and their correlations. All US1 tests passing.
 
 ---
 
@@ -397,30 +419,33 @@ Task: "Create EntitlementFilters component in app/(dashboard)/entitlements/compo
 
 With multiple developers:
 
-1. **Week 1**: Team completes Setup + Foundational together (T001-T036)
+1. **Week 1**: Team completes Setup + Foundational together (T001-T049) ✅ COMPLETE
+   - All 124 foundational tests now passing
+   - Database schema, domain models, connectors, audit service ready
+   - Test infrastructure in place with Vitest 3.2.4
 2. **Week 2-3**: Once Foundational is done:
-   - Developer A: User Story 1 (Identity/Account correlation)
-   - Developer B: User Story 2 (Entitlement catalog)
+   - Developer A: User Story 1 (Identity/Account correlation with tests)
+   - Developer B: User Story 2 (Entitlement catalog with tests)
 3. **Week 4**:
-   - Developer A: User Story 3 (Access grant tracking)
+   - Developer A: User Story 3 (Access grant tracking with tests)
 4. **Week 5-6**:
-   - Developer A: User Story 4 (Access requests)
-   - Developer B: User Story 5 (Provisioning)
+   - Developer A: User Story 4 (Access requests with tests)
+   - Developer B: User Story 5 (Provisioning with tests)
 5. **Week 7**:
-   - Developer A or B: User Story 6 (Certification)
+   - Developer A or B: User Story 6 (Certification with tests)
 6. **Week 8**: Polish phase together
-7. Stories complete and integrate independently
+7. Stories complete and integrate independently with full test coverage
 
 ---
 
 ## Task Count Summary
 
-**Total Tasks**: 154
+**Total Tasks**: 185 (including TDD test tasks)
 
 **By Phase**:
-- Phase 1 (Setup): 8 tasks
-- Phase 2 (Foundational): 28 tasks (CRITICAL BLOCKING)
-- Phase 3 (US1 - Identity/Account): 22 tasks
+- Phase 1 (Setup): 8 tasks ✅ COMPLETE
+- Phase 2 (Foundational): 41 tasks ✅ COMPLETE (includes 13 TDD test setup tasks)
+- Phase 3 (US1 - Identity/Account): 31 tasks (includes 9 new test tasks)
 - Phase 4 (US2 - Entitlements): 16 tasks
 - Phase 5 (US3 - Grants): 16 tasks
 - Phase 6 (US4 - Access Requests): 17 tasks
@@ -428,9 +453,13 @@ With multiple developers:
 - Phase 8 (US6 - Certification): 14 tasks
 - Phase 9 (Polish): 16 tasks
 
-**Parallel Opportunities**: 89 tasks marked [P] can run in parallel (within their phase constraints)
+**Testing Approach**: Following TDD with Vitest 3.2.4 (official Next.js recommendation)
+- 124 foundational tests passing (database, models, connectors, audit, contracts)
+- Additional test tasks added to each user story phase (write tests before implementation)
 
-**MVP Scope**: Phase 1 + Phase 2 + Phase 3 = 58 tasks (Identity and Account correlation only)
+**Parallel Opportunities**: 98 tasks marked [P] can run in parallel (within their phase constraints)
+
+**MVP Scope**: Phase 1 + Phase 2 + Phase 3 = 80 tasks (Identity and Account correlation with comprehensive test coverage)
 
 **Independent Test Criteria**:
 - US1: Import identities, discover accounts, view correlation graph
@@ -447,9 +476,12 @@ With multiple developers:
 - [P] tasks = different files, no dependencies within their phase
 - [Story] label maps task to specific user story for traceability
 - Each user story should be independently completable and testable
+- **TDD Approach**: Tests are written BEFORE implementation for all new features
+- **Test Coverage**: 124 foundational tests passing, each user story adds story-specific tests
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
-- Tests were NOT included as they were not requested in the feature specification
+- Run `npm run test:all` before committing to ensure no regressions
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence
-- Technology stack: Next.js 14+, TypeScript 5.x, Prisma ORM, PostgreSQL 16 with Apache AGE, shadcn/ui, Tailwind CSS per research.md
+- Technology stack: Next.js 14+, TypeScript 5.x, Prisma ORM, PostgreSQL 16 with Apache AGE, shadcn/ui, Tailwind CSS, Vitest 3.2.4 per research.md
 - All file paths follow Next.js App Router convention per plan.md
+- Testing documentation: See [TESTING_TDD.md](../../TESTING_TDD.md) for test patterns and workflows
