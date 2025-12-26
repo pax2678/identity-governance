@@ -5,7 +5,7 @@
 
 ## Overview
 
-We've adopted a TDD approach using Vitest as the official Next.js recommended testing framework. All 125 tests are now passing across unit, integration, and contract test suites.
+We've adopted a TDD approach using Vitest as the official Next.js recommended testing framework. All 124 tests are now passing across unit, integration, and contract test suites.
 
 ## Current Testing Setup
 
@@ -13,12 +13,12 @@ We've adopted a TDD approach using Vitest as the official Next.js recommended te
 
 We're using **Vitest 3.2.4** following the official Next.js testing documentation. This is the officially recommended version for Next.js 14.
 
-**Status**: ✅ All 125 tests passing across 9 test files
+**Status**: ✅ All 124 tests passing across 8 test files
 
 Test coverage includes:
-- **Unit tests** (45 tests): Fast, isolated tests for pure functions
-- **Integration tests** (50 tests): Tests with real dependencies (database)
-- **Contract tests** (30 tests): Interface compliance tests for connectors
+- **Unit tests** (50 tests): Fast, isolated tests for pure functions
+- **Integration tests** (47 tests): Tests with real dependencies (database)
+- **Contract tests** (27 tests): Interface compliance tests for connectors
 
 ### Key Configuration
 
@@ -70,10 +70,10 @@ tests/
 
 |  Category | Tests | Status |
 |-----------|-------|--------|
-| Vitest Unit Tests | 45 | ✅ All passing |
-| Vitest Integration Tests | 50 | ✅ All passing |
-| Vitest Contract Tests | 30 | ✅ All passing |
-| **Total** | **125** | **✅ 100% passing** |
+| Vitest Unit Tests | 50 | ✅ All passing |
+| Vitest Integration Tests | 47 | ✅ All passing |
+| Vitest Contract Tests | 27 | ✅ All passing |
+| **Total** | **124** | **✅ 100% passing** |
 
 ## Writing New Tests
 

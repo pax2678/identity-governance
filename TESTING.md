@@ -67,9 +67,9 @@ We use **Vitest 3.2.4** (official Next.js recommendation) with 124 tests coverin
 npm run test:all
 
 # Run by test type
-npm run test:unit          # Unit tests (45 tests)
-npm run test:integration   # Integration tests (50 tests)
-npm run test:contract      # Contract tests (29 tests)
+npm run test:unit          # Unit tests (50 tests)
+npm run test:integration   # Integration tests (47 tests)
+npm run test:contract      # Contract tests (27 tests)
 
 # Watch mode for TDD
 npm run test:watch
